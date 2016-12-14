@@ -194,6 +194,11 @@ void FeatureGenerator::Preprocess(const cv::Mat& img,
    * objects in input_channels. */
   cv::split(sample_normalized, *input_channels);
 
+  // Normalize to 0-1.
+  for (size_t ii = 0; ii < input_channels->size(); ++ii) {
+    input_channels->at(ii) = input_channels->at(ii) / 255.0;
+  }
+
   CHECK(reinterpret_cast<float*>(input_channels->at(0).data)
         == net_->input_blobs()[0]->cpu_data())
     << "Input channels are not wrapping the input layer of the network.";
