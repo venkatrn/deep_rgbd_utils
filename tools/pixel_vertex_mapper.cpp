@@ -5,6 +5,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/contrib/contrib.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -16,9 +17,21 @@ using namespace flann;
 
 namespace {
 const int kNumNeighbors = 5;
-const int kMinObservations = 100;
-// const string kCoffeeMugMeans = "/home/venkatrn/research/YCB/025_mug/coffee_mug_0004.means";
-const string kCoffeeMugMeans = "/home/venkatrn/research/YCB/025_mug/coffee_mug.means";
+const int kMinObservations = 0;
+const string kCoffeeMugMeans = "/home/venkatrn/research/YCB/025_mug/coffee_mug_0004.means";
+// const string kCoffeeMugMeans = "/home/venkatrn/research/YCB/025_mug/coffee_mug.means";
+
+// TODO: move to params struct.
+constexpr double kFocalLengthColorX = 536.6984;
+constexpr double kFocalLengthColorY = 536.7606;
+constexpr double kPrincipalPointX = 319.5645;
+constexpr double kPrincipalPointY = 243.335;
+constexpr int kColorWidth = 640;
+constexpr int kColorHeight = 480;
+cv::Mat kCameraIntrinsics =  (cv::Mat_<double>(3,3) << kFocalLengthColorX, 0, kPrincipalPointX, 
+                                                0, kFocalLengthColorY, kPrincipalPointY, 
+                                                0, 0, 1);
+const int kNumMatchesForPnP = 4;
 } // namespace
 
 // Yuck, create a class.
@@ -30,7 +43,11 @@ std::unique_ptr<flann::Index<L2<float>>> coffee_mug_index;
 pcl::PointCloud<pcl::PointXYZ>::Ptr coffee_mug_cloud(new pcl::PointCloud<pcl::PointXYZ>);
 PointCloudPtr colored_cloud_(new PointCloud);
 pcl::visualization::PCLVisualizer *viewer;
+cv::Mat coffee_mug_points_; 
 
+int click_counter_ = 0;
+cv::Mat object_points_ = cv::Mat::zeros(kNumMatchesForPnP,3, CV_64FC1);
+cv::Mat image_points_ = cv::Mat::zeros(kNumMatchesForPnP,2, CV_64FC1);
 
 PointCloudPtr GetModelHeatmap(const std::vector<float>& feature, 
                               pcl::PointCloud<pcl::PointXYZ>::Ptr model_cloud, 
@@ -73,15 +90,15 @@ PointCloudPtr GetModelHeatmap(const std::vector<float>& feature,
         //   printf("%f ,", model_features[ii][jj]);
         // }
         // printf("\nF2\n");
-        // printf("\n");
-        // for (size_t jj = 0; jj < 10; ++jj) {
-        //   printf("%f ,", query_matrix[jj]);
-        //   printf("%f ,", query_matrix[jj]);
-        // }
-        // printf("\n");
         // for (size_t jj = 0; jj < 10; ++jj) {
         //   printf("%f ,", feature[jj]);
         // }
+        // printf("\n");
+        // for (size_t jj = 0; jj < 10; ++jj) {
+        //   // printf("%f ,", query_matrix[jj]);
+        //   printf("%f ,", query_matrix[jj]);
+        // }
+        // printf("\n");
         // printf("\n");
         // printf("Dist: %f\n", dists[ii]);
         normalizer += dists[ii];
@@ -95,8 +112,9 @@ PointCloudPtr GetModelHeatmap(const std::vector<float>& feature,
   }
   for (size_t ii = 0; ii < model_cloud->points.size(); ++ii) {
     // Color color = GetColor(dists[ii], min_dist, max_dist);
+    Color color = GetColor(max_dist - dists[ii], 0.0, max_dist - min_dist);
     // Color color = GetColor(max_dist - dists[ii], 0.0, max_dist - min_dist);
-    Color color = GetColor(dists[ii], min_dist, max_dist);
+    // Color color = GetColor(dists[ii], min_dist, max_dist);
     colored_cloud->points[ii].r = 255 * color.r;
     colored_cloud->points[ii].g = 255 * color.g;
     colored_cloud->points[ii].b = 255 * color.b;
@@ -105,10 +123,25 @@ PointCloudPtr GetModelHeatmap(const std::vector<float>& feature,
   return colored_cloud;
 }
 
+void GetObjectPose(const cv::Mat& object_points, const cv::Mat& image_points,
+                   const cv::Mat& points_to_project,
+                   cv::Mat& projected_points) {
+  cv::Mat rvec, tvec;
+  cv::Mat distCoeffs(4,1,cv::DataType<double>::type);
+  distCoeffs.at<double>(0) = 0;
+  distCoeffs.at<double>(1) = 0;
+  distCoeffs.at<double>(2) = 0;
+  distCoeffs.at<double>(3) = 0;
+  // cv::solvePnP(object_points, image_points, kCameraIntrinsics, distCoeffs, rvec, tvec, false, CV_P3P);
+  cv::solvePnP(object_points, image_points, kCameraIntrinsics, distCoeffs, rvec, tvec, false);
+  cv::projectPoints(points_to_project, rvec, tvec, kCameraIntrinsics, distCoeffs, projected_points);
+}
+
 void CVCallback(int event, int x, int y, int flags, void* userdata)
 {
      if  ( event == cv::EVENT_LBUTTONDOWN )
      {
+        ++click_counter_;
         cv::Mat disp_image1 = img1.clone();
         cv::Mat disp_image2 = img2.clone();
 
@@ -167,7 +200,16 @@ void CVCallback(int event, int x, int y, int flags, void* userdata)
 
         // printf("Getting colored cloud\n");
         colored_cloud_ = GetModelHeatmap(feature, coffee_mug_cloud, coffee_mug_features, coffee_mug_counts);
-        
+
+        // Save the image point and closest object point
+        coffee_mug_index->knnSearch(query_matrix, k_indices, k_distances, kNumNeighbors, flann::SearchParams(-1));
+        pcl::PointXYZ closest_model_point = coffee_mug_cloud->points[k_indices[0][0]];
+        const int row_idx = click_counter_ % kNumMatchesForPnP;
+        image_points_.at<double>(row_idx, 0) = x;
+        image_points_.at<double>(row_idx, 1) = y;
+        object_points_.at<double>(row_idx, 0) = closest_model_point.x;
+        object_points_.at<double>(row_idx, 1) = closest_model_point.y;
+        object_points_.at<double>(row_idx, 2) = closest_model_point.z;
      }
      else if  ( event == cv::EVENT_RBUTTONDOWN ) {
      }
@@ -175,6 +217,23 @@ void CVCallback(int event, int x, int y, int flags, void* userdata)
      }
      else if ( event == cv::EVENT_MOUSEMOVE ) {
      }
+}
+
+void UpdateProjection() {
+  if (click_counter_ != 0 && click_counter_ % kNumMatchesForPnP == 0) {
+    cv::Mat disp_image2;
+    disp_image2 = img2.clone();
+    cv::Mat projected_points;
+    GetObjectPose(object_points_, image_points_,
+                  coffee_mug_points_,
+                  projected_points);
+    for (size_t ii = 0; ii < projected_points.rows; ++ii) {
+      const cv::Point center(projected_points.at<double>(ii,0), 
+                            projected_points.at<double>(ii,1));
+      cv::circle(disp_image2, center, 1, cv::Scalar(0,255,255), -1);
+    }
+    cv::imshow("image_2", disp_image2);
+  }
 }
 
 int main(int argc, char** argv) {
@@ -185,7 +244,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-
   // Bring up PCL viewer.
   viewer = new pcl::visualization::PCLVisualizer("PCL Viewer");
   viewer->removeAllPointClouds();
@@ -193,8 +251,9 @@ int main(int argc, char** argv) {
 
   // coffee_mug_cloud.reset(new pcl::PointCloud<pcl::PointXYZ>);
   ReadModelFeatures(kCoffeeMugMeans, coffee_mug_cloud, &coffee_mug_features, &coffee_mug_counts);
+  PCDToCVMat(coffee_mug_cloud, coffee_mug_points_);
   // Build NN index for features of the 3D model.
-  // BuildKDTreeIndex(model_features, coffee_mug_index);
+  BuildKDTreeIndex(coffee_mug_features, coffee_mug_index);
 
   string model_file   = argv[1];
   string trained_file = argv[2];
@@ -238,13 +297,13 @@ int main(int argc, char** argv) {
 
   cv::setMouseCallback("image_2", CVCallback, NULL);
 
-
   while (1) {
     if (!viewer->updatePointCloud(colored_cloud_, "colored_cloud")) {
       viewer->addPointCloud(colored_cloud_, "colored_cloud");
       viewer->setPointCloudRenderingProperties(
         pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 4, "colored_cloud");
     }
+    UpdateProjection();
     viewer->spinOnce();
     cv::waitKey(10);
   }

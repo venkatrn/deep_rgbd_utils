@@ -55,6 +55,44 @@ std::vector<std::pair<cv::Point, double>> GetLocalMaxima(const cv::Mat &image, b
 bool BuildKDTreeIndex(const std::vector<std::vector<float>>& feature_vectors, 
                       std::unique_ptr<flann::Index<L2<float>>>& index);
 
+// This *does not* copy data, it simply wraps it. Therefore, changes to the returned cv::Mat
+// will affect the vector2d array.
+void WrapVector2DToCVMat(std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
+  if (array2d.empty()) {
+    return;
+  }
+  mat.create(array2d.size(), array2d[0].size(), CV_64F);
+  for(int ii = 0; ii < array2d.size(); ++ii) {
+        mat.row(ii) = cv::Mat(array2d[ii]).t();
+  }
+}
+
+// This copies data. Therefore, changes to the returned cv::Mat
+// will affect the vector2d array.
+void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
+  if (array2d.empty()) {
+    return;
+  }
+  mat.create(array2d.size(), array2d[0].size(), CV_64F);
+  for(int ii = 0; ii < array2d.size(); ++ii) {
+        mat.row(ii) = cv::Mat(array2d[ii]).t();
+  }
+}
+
+template <class T>
+void PCDToCVMat(const T cloud, cv::Mat &mat) {
+  if (cloud->points.empty()) {
+    return;
+  }
+  mat.create(cloud->points.size(), 3, CV_64F);
+  for (size_t ii = 0; ii < cloud->points.size(); ++ii) {
+    const auto& point = cloud->points[ii];
+    mat.at<double>(ii, 0) = point.x;
+    mat.at<double>(ii, 1) = point.y;
+    mat.at<double>(ii, 2) = point.z;
+  }
+}
+
 template <typename ValueType>
 flann::Matrix<ValueType> VectorToFlann(
     const std::vector<std::vector<ValueType>>& v
