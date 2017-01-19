@@ -38,7 +38,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp 
   roslib)
 find_package(Boost COMPONENTS serialization thread mpi REQUIRED)
-# find_package(OpenCV REQUIRED)
+find_package(OpenCV REQUIRED)
 find_package(MPI REQUIRED)
 find_package(OpenMP)
 if (OPENMP_FOUND)
@@ -69,7 +69,7 @@ catkin_package(
     roscpp 
     roslib 
   DEPENDS 
-    # OpenCV 
+    OpenCV 
     MPI 
     OpenMP 
     PCL 
@@ -82,6 +82,8 @@ catkin_package(
 
 add_library(${PROJECT_NAME}
   src/feature_generator_net.cpp
+  src/image.cpp
+  src/model.cpp
   src/helpers.cpp)
 
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}

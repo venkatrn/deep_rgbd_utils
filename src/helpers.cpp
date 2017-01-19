@@ -1,10 +1,44 @@
 #include <deep_rgbd_utils/helpers.h>
 
+#include <pcl/conversions.h>
+#include <pcl/filters/filter.h>
+#include <pcl_ros/transforms.h>
+#include <pcl/PCLPointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+
 #include <algorithm>
 
 using namespace std;
 
 namespace dru {
+
+
+pcl::PointXYZ CamToWorld(int u, int v, float depth) {
+  pcl::PointXYZ point;
+  point.x =  depth * (u - kPrincipalPointX) / kFocalLengthColorX;
+  point.y =  depth * (v - kPrincipalPointY) / kFocalLengthColorY;
+  point.z = depth;
+  return point;
+}
+
+// Project world (x,y,z) point to camera (x,y) point. For OpenCV,
+// note camera (x,y) is equivalent to (col,row)
+void WorldToCam(float x, float y, float z, int& cam_x, int& cam_y) {
+  cam_x = kFocalLengthColorX * (x/z) + kPrincipalPointX;
+  cam_y = kFocalLengthColorY * (y/z) + kPrincipalPointY;
+}
+
+void WorldToCam(const pcl::PointXYZ& point, int& cam_x, int& cam_y) {
+  WorldToCam(point.x, point.y, point.z, cam_x, cam_y);
+}
+
+cv::Point IndexToPoint(int i, int rows, int cols) {
+  return cv::Point(i / rows, i & rows);
+}
+
+int PointToIndex(cv::Point point, int rows, int cols) {
+  return point.x * rows + point.y;
+}
 
 Color GetColor(double v,double vmin,double vmax)
 {
@@ -31,69 +65,6 @@ Color GetColor(double v,double vmin,double vmax)
       c.b = 0;
    }
    return(c);
-}
-
-bool ReadModelFeatures(const string& file, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, 
-    std::vector<std::vector<float>>* feature_vectors, std::vector<int>* num_observations) {
-
-  cloud->points.clear();
-
-  ifstream model_file;
-  model_file.open (file.c_str(), ios::in | ios::binary); 
-  if (model_file.is_open()) {
-    int32_t num_points = 0;
-    model_file.read(reinterpret_cast<char *>(&num_points), sizeof(num_points));
-    printf("Num points: %d\n", num_points);
-    cloud->points.resize(num_points);
-    // Read the points.
-    for (int ii = 0; ii < num_points; ++ii) {
-      pcl::PointXYZ point;
-      model_file.read(reinterpret_cast<char *>(&point.x), sizeof(float));
-      model_file.read(reinterpret_cast<char *>(&point.y), sizeof(float));
-      model_file.read(reinterpret_cast<char *>(&point.z), sizeof(float));
-      cloud->points[ii] = point;
-      // printf("Vertex: %f %f %f\n", point.x, point.y, point.z);
-    }
-    cloud->width = 1;
-    cloud->height = num_points;
-    cloud->is_dense = false;
-
-    // Read the number of observations per point.
-    num_observations->clear();
-    num_observations->resize(num_points, 0);
-    int n_obs = 0;
-    for (int ii = 0; ii < num_points; ++ii) {
-      model_file.read(reinterpret_cast<char *>(&n_obs), sizeof(int));
-      num_observations->at(ii) = static_cast<int>(n_obs);
-    }
-
-    int feature_dim = 0;
-    model_file.read(reinterpret_cast<char *>(&feature_dim), sizeof(int));
-    printf("Feature dimensionality: %d\n", feature_dim);
-
-    // Read the features corresponding to each point.
-    feature_vectors->clear();
-    feature_vectors->resize(num_points, vector<float>(feature_dim, 0.0));
-    // vector<float> feature_vector(feature_dim);
-    for (int ii = 0; ii < num_points; ++ii) {
-      // for (int jj = 0; jj < feature_dim; ++jj) {
-      //   model_file.read(reinterpret_cast<char *>(&feature_vectors->at(ii)[jj]), sizeof(float));
-      // }
-      // model_file.read(reinterpret_cast<char *>(feature_vector.data()), sizeof(feature_vector));
-      // feature_vectors->at(ii) = feature_vector;
-      model_file.read(reinterpret_cast<char *>(feature_vectors->at(ii).data()), feature_dim * sizeof(float));
-      // for (int jj = 0; jj < feature_dim; ++jj) {
-      //   printf("%f ", feature_vectors->at(ii)[jj]);
-      // }
-      // printf("\n");
-    }
-    model_file.close();
-  } else {
-    printf("Could not open model means file\n");
-    return false;
-  }
-
-  return true;
 }
 
 std::vector<std::pair<cv::Point, double>> GetLocalMaxima(const cv::Mat &image, bool sort_maxima) {
@@ -138,5 +109,25 @@ bool BuildKDTreeIndex(const std::vector<std::vector<float>>& feature_vectors,
   index.reset(new flann::Index<L2<float>>(feature_matrix, flann::KDTreeSingleIndexParams(4, false)));
   index->buildIndex();
   return true;
+}
+
+void WrapVector2DToCVMat(std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
+  if (array2d.empty()) {
+    return;
+  }
+  mat.create(array2d.size(), array2d[0].size(), CV_64F);
+  for(int ii = 0; ii < array2d.size(); ++ii) {
+        mat.row(ii) = cv::Mat(array2d[ii]).t();
+  }
+}
+
+void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
+  if (array2d.empty()) {
+    return;
+  }
+  mat.create(array2d.size(), array2d[0].size(), CV_64F);
+  for(int ii = 0; ii < array2d.size(); ++ii) {
+        mat.row(ii) = cv::Mat(array2d[ii]).t();
+  }
 }
 } // namespace dru

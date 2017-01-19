@@ -23,7 +23,11 @@ class FeatureGenerator {
              const string& trained_file);
 
   // Feature vectors for all pixels in the image, in row major order.
+  // For RGB image. (Needs to be 0-255 range)
   std::vector<std::vector<float>> GetFeatures(const cv::Mat& img);
+  // For RGB-D image. (RGB is [0-255], D is in millimiters -- the default
+  // Kinect format)
+  std::vector<std::vector<float>> GetFeatures(const cv::Mat& rgb_img, const cv::Mat& depth_image);
   // Ditto, but for a particular pixel in the image.
   std::vector<float> GetFeature(const cv::Mat& img, const cv::Point& point);
 
@@ -33,6 +37,9 @@ class FeatureGenerator {
   void WrapInputLayer(std::vector<cv::Mat>* input_channels);
 
   void Preprocess(const cv::Mat& img,
+                  std::vector<cv::Mat>* input_channels);
+
+  void Preprocess(const cv::Mat& rgb_img, const cv::Mat& depth_img,
                   std::vector<cv::Mat>* input_channels);
 
  private:

@@ -6,24 +6,42 @@
 
 #include <flann/flann.h>
 
-#include <pcl/conversions.h>
-#include <pcl/filters/filter.h>
-#include <pcl_ros/transforms.h>
-#include <pcl/PCLPointCloud2.h>
-#include <pcl_conversions/pcl_conversions.h>
-
-#include <pcl/io/io.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/io/png_io.h>
-#include <pcl/io/vtk_lib_io.h>
-#include <pcl/common/common.h>
-#include <pcl/console/print.h>
-
 #include <vector>
 #include <string>
 #include <memory>
 
 namespace dru {
+
+using FeatureVector = std::vector<float>;
+using PointValuePair = std::pair<cv::Point, double>;
+
+// TODO: move to params struct.
+constexpr double kFocalLengthColorX = 536.6984;
+constexpr double kFocalLengthColorY = 536.7606;
+constexpr double kPrincipalPointX = 319.5645;
+constexpr double kPrincipalPointY = 243.335;
+constexpr int kColorWidth = 640;
+constexpr int kColorHeight = 480;
+const cv::Mat kCameraIntrinsics =  (cv::Mat_<double>(3,3) << kFocalLengthColorX, 0, kPrincipalPointX, 
+                                                0, kFocalLengthColorY, kPrincipalPointY, 
+                                                0, 0, 1);
+
+pcl::PointXYZ CamToWorld(int u, int v, float depth);
+
+// Project world (x,y,z) point to camera (x,y) point. For OpenCV,
+// note camera (x,y) is equivalent to (col,row)
+void WorldToCam(float x, float y, float z, int& cam_x, int& cam_y);
+
+void WorldToCam(const pcl::PointXYZ& point, int& cam_x, int& cam_y);
+
+cv::Point IndexToPoint(int i, int rows, int cols);
+
+int PointToIndex(cv::Point point, int rows, int cols);
+
+typedef struct {
+    double r,g,b;
+} Color;
+
 
 // http://stackoverflow.com/questions/7706339/grayscale-to-red-green-blue-matlab-jet-color-scale
 /*
@@ -33,23 +51,13 @@ namespace dru {
    The colour is clipped at the end of the scales if v is outside
    the range [vmin,vmax]
 */
-
-typedef struct {
-    double r,g,b;
-} Color;
-
 // Apply jet coloring.
 Color GetColor(double v,double vmin,double vmax);
-
-// Read a model means binary file and unpack to points, features for each
-// point, and number of observations for each point. 
-bool ReadModelFeatures(const std::string& file, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, 
-    std::vector<std::vector<float>>* feature_vectors, std::vector<int>* num_observations);
 
 // Return the local maxima points for an image (assumed to be CV_64FC1) and
 // their corresponding values. Maxima are sorted in descending order by
 // default.
-std::vector<std::pair<cv::Point, double>> GetLocalMaxima(const cv::Mat &image, bool sort=true);
+std::vector<PointValuePair> GetLocalMaxima(const cv::Mat &image, bool sort=true);
 
 // Construct a KDTree index for a set of features.
 bool BuildKDTreeIndex(const std::vector<std::vector<float>>& feature_vectors, 
@@ -57,27 +65,11 @@ bool BuildKDTreeIndex(const std::vector<std::vector<float>>& feature_vectors,
 
 // This *does not* copy data, it simply wraps it. Therefore, changes to the returned cv::Mat
 // will affect the vector2d array.
-void WrapVector2DToCVMat(std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
-  if (array2d.empty()) {
-    return;
-  }
-  mat.create(array2d.size(), array2d[0].size(), CV_64F);
-  for(int ii = 0; ii < array2d.size(); ++ii) {
-        mat.row(ii) = cv::Mat(array2d[ii]).t();
-  }
-}
+void WrapVector2DToCVMat(std::vector<std::vector<double>>& array2d, cv::Mat& mat);
 
 // This copies data. Therefore, changes to the returned cv::Mat
 // will affect the vector2d array.
-void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& mat) {
-  if (array2d.empty()) {
-    return;
-  }
-  mat.create(array2d.size(), array2d[0].size(), CV_64F);
-  for(int ii = 0; ii < array2d.size(); ++ii) {
-        mat.row(ii) = cv::Mat(array2d[ii]).t();
-  }
-}
+void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& mat);
 
 template <class T>
 void PCDToCVMat(const T cloud, cv::Mat &mat) {
