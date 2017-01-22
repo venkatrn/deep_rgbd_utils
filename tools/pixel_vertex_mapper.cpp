@@ -10,7 +10,8 @@
 #include <opencv2/calib3d/calib3d.hpp>
 
 #include <pcl/registration/transformation_estimation_svd.h>
-#include <pcl/registration/correspondence_rejection_sample_consensus.h>
+// #include <pcl/registration/correspondence_rejection_sample_consensus.h>
+#include <deep_rgbd_utils/correspondence_rejection_sample_consensus_multiple.h>
 
 #include <iostream>
 #include <fstream>
@@ -29,8 +30,9 @@ const int kNumNeighbors = 5;
 const int kMinObservations = 0;
 
 const string kCoffeeMugMeans =
-  "/home/venkatrn/research/dense_features/means/brick.means";
+  "/home/venkatrn/research/dense_features/means/jello.means";
 // const string kCoffeeMugMeans = "/home/venkatrn/research/dense_features/means/coffee_mug.means";
+string out_file;
 
 bool updated = false;
 
@@ -43,6 +45,9 @@ Image img1, img2, depth_img;
 Model coffee_model;
 PointCloudPtr colored_cloud_(new PointCloud);
 cv::Mat coffee_mug_points_;
+pcl::Correspondences new_correspondences_;
+pcl::Correspondences correspondences_;
+std::vector<std::pair<pcl::PointXYZ, pcl::PointXYZ>> matches_;
 
 int click_counter_ = 0;
 cv::Mat object_points_ = cv::Mat::zeros(kNumMatchesForPnP, 3, CV_64FC1);
@@ -64,8 +69,8 @@ cv::Mat image_points_ = cv::Mat::zeros(kNumMatchesForPnP, 2, CV_64FC1);
 // }
 
 //  Return the transform from model to image.
-void GetTransform(const Image &rgb_image, const Image &depth_image,
-                  const Model &model, Eigen::Matrix4f &transform) {
+void GetTransforms(const Image &rgb_image, const Image &depth_image,
+                  const Model &model, std::vector<Eigen::Matrix4f> *transforms) {
   high_res_clock::time_point routine_begin_time = high_res_clock::now();
   const auto &model_mean = coffee_model.GetModelMeanFeature();
   // TODO: clean up.
@@ -80,6 +85,7 @@ void GetTransform(const Image &rgb_image, const Image &depth_image,
   cv::threshold(distance_map, obj_mask_binary, 180, 255, CV_THRESH_BINARY);
 
   cv::imshow("obj_mask", obj_mask_binary);
+  cv::imwrite("im" + out_file + "_3.png", obj_mask_binary);
 
 
   // Form the sample consensus method
@@ -87,8 +93,6 @@ void GetTransform(const Image &rgb_image, const Image &depth_image,
                                                   pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr model_cloud(new
                                                   pcl::PointCloud<pcl::PointXYZ>);
-  pcl::Correspondences correspondences;
-  pcl::Correspondences new_correspondences;
   const auto &img = rgb_image.image();
   int idx = 0;
 
@@ -113,7 +117,7 @@ void GetTransform(const Image &rgb_image, const Image &depth_image,
       model_cloud->points.push_back(model_point);
       // TODO: the distance argument might be useful in other correspondence
       // routines.
-      correspondences.push_back(pcl::Correspondence(idx, idx, 0.0));
+      correspondences_.push_back(pcl::Correspondence(idx, idx, 0.0));
       ++idx;
     }
   }
@@ -125,16 +129,30 @@ void GetTransform(const Image &rgb_image, const Image &depth_image,
   model_cloud->height = idx;
   model_cloud->is_dense = false;
 
-  pcl::registration::CorrespondenceRejectorSampleConsensus<pcl::PointXYZ> sac;
+  pcl::registration::CorrespondenceRejectorSampleConsensusMultiple<pcl::PointXYZ> sac;
   sac.setInputSource(model_cloud);
   sac.setInputTarget(image_cloud);
   high_res_clock::time_point ransac_begin_time = high_res_clock::now();
   sac.setMaximumIterations(1000);
-  sac.setInlierThreshold(0.005);
-  sac.getRemainingCorrespondences(correspondences, new_correspondences);
-  sac.setRefineModel(true);
-  transform = sac.getBestTransformation();
-  cout << transform << endl;
+  sac.setInlierThreshold(0.01);
+  sac.setRefineModel(false);
+  // sac.setSaveInliers(true);
+
+  sac.getRemainingCorrespondences(correspondences_, new_correspondences_);
+  *transforms = sac.getBestTransformations();
+
+  matches_.resize(new_correspondences_.size());
+
+  for (size_t ii = 0; ii < new_correspondences_.size(); ++ii) {
+    matches_[ii] = std::make_pair(
+                     image_cloud->points[new_correspondences_[ii].index_query],
+                     model_cloud->points[new_correspondences_[ii].index_match]);
+  }
+
+  // sac.getInliersIndices(inliers_);
+  for (const auto & transform : *transforms) {
+    cout << transform << endl << endl;
+  }
   auto current_time = high_res_clock::now();
   auto routine_time = std::chrono::duration_cast<std::chrono::duration<double>>
                       (current_time - routine_begin_time);
@@ -242,9 +260,12 @@ void CVCallback(int event, int x, int y, int flags, void *userdata) {
   }
 }
 
-void UpdateProjection(const Eigen::Matrix4f &transform) {
+void UpdateProjection(const Eigen::Matrix4f &transform, const string& im_name=
+    "") {
   cv::Mat disp_image2;
   disp_image2 = img2.image().clone();
+  // disp_image2.create(img2.image().rows, img2.image().cols, CV_8UC3);
+  disp_image2.setTo(0);
   cv::Mat projected_points;
   // GetObjectPose(object_points_, depth_points_,
   //               coffee_mug_points_,
@@ -266,9 +287,10 @@ void UpdateProjection(const Eigen::Matrix4f &transform) {
 
   cv::Mat blend;
 
+  const int kOffset = 0; //50
   for (size_t ii = 0; ii < projected_points.rows; ++ii) {
-    const cv::Point center(projected_points.at<double>(ii, 0),
-                           projected_points.at<double>(ii, 1));
+    const cv::Point center(projected_points.at<double>(ii, 0) + kOffset,
+                           projected_points.at<double>(ii, 1) + kOffset);
     // cout << endl << center.y << " " << center.x;
     cv::circle(disp_image2, center, 1, cv::Scalar(0, 255, 255), -1);
     double alpha = 0.5;
@@ -276,22 +298,42 @@ void UpdateProjection(const Eigen::Matrix4f &transform) {
     cv::addWeighted(disp_image2, alpha, img2.image(), 1 - alpha, 0, blend);
   }
 
-  for (size_t ii = 0; ii < image_points_.rows; ++ii) {
-    const cv::Point center(image_points_.at<double>(ii, 0),
-                           image_points_.at<double>(ii, 1));
-    cv::circle(blend, center, 5, cv::Scalar(255, 0, 0), -1);
-  }
+  // for (size_t ii = 0; ii < image_points_.rows; ++ii) {
+  //   const cv::Point center(image_points_.at<double>(ii, 0),
+  //                          image_points_.at<double>(ii, 1));
+  //   cv::circle(blend, center, 5, cv::Scalar(255, 0, 0), -1);
+  // }
+
+  // for (size_t ii = 0; ii < matches_.size(); ++ii) {
+  //   int cam_x = 0;
+  //   int cam_y = 0;
+  //   auto model_point = matches_[ii].second;
+  //   Eigen::Vector4f eig_point;
+  //   eig_point << model_point.x, model_point.y, model_point.z, 1;
+  //   eig_point = transform * eig_point;
+  //   WorldToCam(eig_point[0], eig_point[1], eig_point[2], cam_x, cam_y);
+  //   const cv::Point model_pixel(cam_x + kOffset, cam_y + kOffset);
+  //   auto image_point = matches_[ii].first;
+  //   WorldToCam(image_point.x, image_point.y, image_point.z, cam_x, cam_y);
+  //   const cv::Point image_pixel(cam_x, cam_y);
+  //   cv::circle(blend, model_pixel, 1, cv::Scalar(255, 0, 0), -1);
+  //   cv::circle(blend, image_pixel, 1, cv::Scalar(255, 0, 0), -1);
+  //   cv::line(blend, model_pixel, image_pixel, cv::Scalar(0, 0, 255), 1);
+  // }
 
   cv::imshow("image_2", blend);
-  cv::waitKey(10);
+  if (!im_name.empty()) {
+    cv::imwrite(im_name.c_str(), blend);
+  }
+  // cv::waitKey(10);
 }
 
 int main(int argc, char **argv) {
   // if (argc != 5) {
-  if (argc < 5) {
+  if (argc < 6) {
     std::cerr << "Usage: " << argv[0]
               << " deploy.prototxt network.caffemodel"
-              << " img1.jpg img2.jpg img2_depth.jpg" <<  std::endl;
+              << " img1.jpg img2.jpg img2_depth.jpg output_num" <<  std::endl;
     return 1;
   }
 
@@ -310,6 +352,7 @@ int main(int argc, char **argv) {
   string img1_file = argv[3];
   string img2_file = argv[4];
   string depth_file = argv[5];
+  out_file = argv[6];
 
   img1.SetImage(img1_file);
   img2.SetImage(img2_file);
@@ -343,8 +386,19 @@ int main(int argc, char **argv) {
   cv::imshow("heatmap", img1.image());
   cv::imshow("obj_mask", img2.image());
 
-  GetTransform(img2, depth_img, coffee_model, best_transform);
-  UpdateProjection(best_transform);
+  cout << "im" + out_file + "_1.png";
+  cv::imwrite("im" + out_file + "_1.png", img2.image());
+
+  std::vector<Eigen::Matrix4f> transforms;
+  GetTransforms(img2, depth_img, coffee_model, &transforms);
+  for (size_t ii = 0; ii < transforms.size(); ++ii) {
+    string name = "im" + out_file + "_p" + to_string(ii) + 
+      ".png";
+    UpdateProjection(transforms[ii], name);
+    // cv::waitKey();
+  }
+  // UpdateProjection(best_transform);
+  return 0;
 
   cv::setMouseCallback("image_2", CVCallback, NULL);
 

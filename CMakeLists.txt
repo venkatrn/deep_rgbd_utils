@@ -83,6 +83,8 @@ catkin_package(
 add_library(${PROJECT_NAME}
   src/feature_generator_net.cpp
   src/image.cpp
+  src/ransac.cpp
+  src/correspondence_rejection_sample_consensus_multiple.cpp
   src/model.cpp
   src/helpers.cpp)
 
