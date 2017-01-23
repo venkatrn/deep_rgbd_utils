@@ -10,7 +10,7 @@ project(deep_rgbd_utils)
 # set(ROS_BUILD_TYPE RelWithDebInfo)
 # set(ROS_BUILD_TYPE Debug)
 set(ROS_BUILD_TYPE Release)
-set(CMAKE_CXX_FLAGS "-std=c++0x")
+set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} /home/venkatrn/research/caffe/cmake)
 # set(CMAKE_COLOR_MAKEFILE ON)
@@ -41,6 +41,8 @@ find_package(Boost COMPONENTS serialization thread mpi REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(MPI REQUIRED)
 find_package(OpenMP)
+find_package(Pangolin REQUIRED)
+find_package(Sophus REQUIRED)
 if (OPENMP_FOUND)
   set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
@@ -58,6 +60,8 @@ CMAKE_FORCE_CXX_COMPILER(mpicxx ${CMAKE_CXX_COMPILER_ID})
 include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} ${Caffe_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS})
+include_directories(${Pangolin_INCLUDE_DIR} ${Pangolin_CONFIG_INCLUDE_DIR})
+include_directories(${Sophus_INCLUDE_DIR})
 include_directories(MPI_INCLUDE_PATH)
 
 catkin_package(
@@ -89,7 +93,7 @@ add_library(${PROJECT_NAME}
   src/helpers.cpp)
 
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES} ${Caffe_LIBRARIES} ${CUDA_LIBRARIES}
+  ${PCL_LIBRARIES} ${Caffe_LIBRARIES} ${CUDA_LIBRARIES} ${Pangolin_LIBRARIES}
   libtiff.so libvtkCommon.so libvtkFiltering.so libvtkRendering.so libvtkIO.so
   libvtkGraphics.so libglog.so)
 # target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}
@@ -97,3 +101,6 @@ target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boo
 
 add_executable(vertex_net tools/pixel_vertex_mapper.cpp)
 target_link_libraries(vertex_net ${PROJECT_NAME})
+
+add_executable(dataset_generator tools/dataset_generator.cpp)
+target_link_libraries(dataset_generator ${PROJECT_NAME})
