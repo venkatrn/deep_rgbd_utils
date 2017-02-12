@@ -16,10 +16,28 @@ using FeatureVector = std::vector<float>;
 using PointValuePair = std::pair<cv::Point, double>;
 
 // TODO: move to params struct.
-constexpr double kFocalLengthColorX = 536.6984;
-constexpr double kFocalLengthColorY = 536.7606;
-constexpr double kPrincipalPointX = 319.5645;
-constexpr double kPrincipalPointY = 243.335;
+// Old UW 
+// constexpr double kFocalLengthColorX = 536.6984;
+// constexpr double kFocalLengthColorY = 536.7606;
+// constexpr double kPrincipalPointX = 319.5645;
+// constexpr double kPrincipalPointY = 243.335;
+
+// CMU Dataset
+// constexpr double kFocalLengthColorX = 1077.7606;
+// constexpr double kFocalLengthColorY = 1078.189;
+// constexpr double kPrincipalPointX = 323.7872;
+// constexpr double kPrincipalPointY = 279.6921;
+
+// UW Dataset
+constexpr double kFocalLengthColorX = 1066.778;
+constexpr double kFocalLengthColorY = 1067.487;
+constexpr double kPrincipalPointX = 312.9869;
+constexpr double kPrincipalPointY = 241.3109;
+// const static float K1 = 0.04112172;
+// const static float K2 = -0.4798174;
+// const static float K3 = 1.890084;
+
+
 constexpr int kColorWidth = 640;
 constexpr int kColorHeight = 480;
 const cv::Mat kCameraIntrinsics =  (cv::Mat_<double>(3,3) << kFocalLengthColorX, 0, kPrincipalPointX, 

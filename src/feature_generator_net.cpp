@@ -1,4 +1,6 @@
 #include <deep_rgbd_utils/feature_generator_net.h>
+#include <l2s/image/depthFilling.h>
+
 #define CPU_ONLY 0
 
 FeatureGenerator::FeatureGenerator(const string& caffe_model_file,
@@ -304,8 +306,17 @@ void FeatureGenerator::Preprocess(const cv::Mat& rgb_img,
   // Convert mm to m.
   // input_channels->at(3) = (depth_img.clone() / 1000.0);
   cv::Mat rescaled_depth = depth_img.clone();
-  rescaled_depth.convertTo(rescaled_depth, CV_64FC1);
+  rescaled_depth.convertTo(rescaled_depth, CV_32FC1);
   rescaled_depth = rescaled_depth / 1000.0;
+
+  // Fill holes in depth image.
+  if (!rescaled_depth.isContinuous()) {
+    printf("Depth image is not continuous!!\n");
+  }
+  l2s::ImageXYCf l2s_depth_image(rescaled_depth.cols, rescaled_depth.rows, 1, (float*)rescaled_depth.data);
+  // Fill by reference.
+  l2s::fillDepthImageRecursiveMedianFilter(l2s_depth_image, 2);
+
   rescaled_depth.copyTo(input_channels->at(3));
 
   CHECK(reinterpret_cast<float*>(input_channels->at(0).data)

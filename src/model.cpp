@@ -1,5 +1,17 @@
 #include <deep_rgbd_utils/model.h>
 
+#include <pcl/io/io.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/png_io.h>
+#include <pcl/io/vtk_lib_io.h>
+#include <pcl/console/print.h>
+
+#include <pcl/conversions.h>
+#include <pcl/filters/filter.h>
+#include <pcl_ros/transforms.h>
+#include <pcl/PCLPointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+
 using namespace std;
 
 namespace {
@@ -104,7 +116,7 @@ void Model::SetMeans(const std::string &means_file) {
   BuildKDTreeIndex(shape_features, kd_tree_index_);
 }
 std::vector<pcl::PointXYZ> Model::GetNearestPoints(int num_neighbors,
-                                                   const FeatureVector &feature_vector) {
+                                                   const FeatureVector &feature_vector) const {
   flann::Matrix<float> query_matrix;
   query_matrix = VectorToFlann<float>(feature_vector);
   std::vector<std::vector<int>> k_indices(1);
@@ -154,7 +166,7 @@ PointCloudPtr Model::GetHeatmapCloud(const FeatureVector &feature_vector) {
   return colored_cloud;
 }
 
-std::vector<float> Model::GetModelMeanFeature() {
+std::vector<float> Model::GetModelMeanFeature() const {
   if (features_.empty() || features_[0].empty()) {
     printf("No features for this model\n");
     return std::vector<float>();

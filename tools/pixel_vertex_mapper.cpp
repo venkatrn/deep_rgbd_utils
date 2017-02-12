@@ -29,9 +29,11 @@ namespace {
 const int kNumNeighbors = 5;
 const int kMinObservations = 0;
 
-const string kCoffeeMugMeans =
-  "/home/venkatrn/research/dense_features/means/jello.means";
-// const string kCoffeeMugMeans = "/home/venkatrn/research/dense_features/means/coffee_mug.means";
+// const string kCoffeeMugMeans =
+//   "/home/venkatrn/research/dense_features/means/jello.means";
+const string kCoffeeMugMeans = "/home/venkatrn/research/dense_features/means/coffee_mug.means";
+// const string kCoffeeMugMeans =
+//   "/home/venkatrn/research/dense_features/means/brick.means";
 string out_file;
 
 bool updated = false;
@@ -72,20 +74,22 @@ cv::Mat image_points_ = cv::Mat::zeros(kNumMatchesForPnP, 2, CV_64FC1);
 void GetTransforms(const Image &rgb_image, const Image &depth_image,
                   const Model &model, std::vector<Eigen::Matrix4f> *transforms) {
   high_res_clock::time_point routine_begin_time = high_res_clock::now();
-  const auto &model_mean = coffee_model.GetModelMeanFeature();
+  const auto &model_mean = model.GetModelMeanFeature();
   // TODO: clean up.
   std::vector<int> dims = {29, 30, 31};
   cv::Mat obj_mask, distance_map;
-  rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, 1e-3, 1.0);
+  rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, dims, 1e-3, 1.0);
+  // rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, 1e-3, 1.0);
 
   // Binarize the mask
   cv::Mat obj_mask_binary;
   cv::normalize(distance_map, distance_map, 0, 255, cv::NORM_MINMAX);
   distance_map.convertTo(distance_map, CV_8UC1);
-  cv::threshold(distance_map, obj_mask_binary, 180, 255, CV_THRESH_BINARY);
+  cv::threshold(distance_map, obj_mask_binary, 210, 255, CV_THRESH_BINARY);
 
   cv::imshow("obj_mask", obj_mask_binary);
   cv::imwrite("im" + out_file + "_3.png", obj_mask_binary);
+  cv::imwrite("im" + out_file + "_4.png", obj_mask);
 
 
   // Form the sample consensus method
@@ -103,14 +107,14 @@ void GetTransforms(const Image &rgb_image, const Image &depth_image,
         continue;
       }
 
-      auto img_feature = img2.FeatureAt(col, row);
+      auto img_feature = rgb_image.FeatureAt(col, row);
       pcl::PointXYZ img_point = CamToWorld(col, row,
                                            (float)depth_image.at<uint16_t>(row, col) / 1000.0);
       // TODO: clean up.
       img_feature[29] = 0;
       img_feature[30] = 0;
       img_feature[31] = 0;
-      auto matches = coffee_model.GetNearestPoints(1, img_feature);
+      auto matches = model.GetNearestPoints(1, img_feature);
       pcl::PointXYZ model_point = matches[0];
 
       image_cloud->points.push_back(img_point);
@@ -386,7 +390,6 @@ int main(int argc, char **argv) {
   cv::imshow("heatmap", img1.image());
   cv::imshow("obj_mask", img2.image());
 
-  cout << "im" + out_file + "_1.png";
   cv::imwrite("im" + out_file + "_1.png", img2.image());
 
   std::vector<Eigen::Matrix4f> transforms;

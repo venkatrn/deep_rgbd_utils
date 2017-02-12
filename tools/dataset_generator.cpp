@@ -10,6 +10,35 @@
 
 using namespace std;
 
+// bool DatasetManager::ParseRigFile(const std::string &rig_file,
+//                                   Sophus::SE3d &T_cd) {
+//   std::ifstream rigStream(rig_file);
+//   pangolin::json::value val;
+//   rigStream >> val;
+//
+//   if (!val.contains("rig")) {
+//     throw std::runtime_error("could not find rig");
+//   }
+//
+//   pangolin::json::value rigVal = val["rig"];
+//
+//   if (!rigVal.contains("camera")) {
+//     throw std::runtime_error("could not find camera");
+//   }
+//
+//   rig.reset(new df::Rig<double>(rigVal));
+//
+//   if (rig->numCameras() != 2) {
+//     throw std::runtime_error("expected a rig configuration with 2 cameras (RGB + depth)");
+//   }
+//
+//
+//   const Sophus::SE3d T_rd = rig->transformCameraToRig(depthStreamIndex);
+//   const Sophus::SE3d T_rc = rig->transformCameraToRig(colorStreamIndex);
+//   T_cd = T_rc * T_rd.inverse();
+//   return true;
+// }
+
 template <typename Derived>
 inline std::istream &operator >>(std::istream &stream,
                                  Eigen::MatrixBase<Derived> &M) {
@@ -35,6 +64,10 @@ inline std::istream &operator >>(std::istream &stream,
 bool SaveFrames(const string &video_file, const string &ground_truth,
                 const string &rgb_dir, const string &depth_dir, const string &gt_dir,
                 int num_frames_to_save = -1) {
+  // TODO: read from rig
+  // Sophus::SE3d T_cd;
+  // ParseRigFile("/home/venkatrn/research/ycb/asusRegistered.json", T_cd);
+
   pangolin::VideoInput video(video_file);
   pangolin::VideoPlaybackInterface *playback =
     video.Cast<pangolin::VideoPlaybackInterface>();
@@ -64,32 +97,40 @@ bool SaveFrames(const string &video_file, const string &ground_truth,
   Eigen::Matrix<double, 3, 4> M;
   std::string model_name;
 
-  std::vector<Sophus::SE3d> T_wc;
+  std::vector<Sophus::SE3d> T_wd;
   std::vector<Sophus::SE3d> T_wo;
   std::vector<string> model_names;
 
-  bool model_poses_done = !(isalpha(stream.peek()));
+  // bool model_poses_done = !(isalpha(stream.peek()));
+  //
+  // while (!model_poses_done) {
+  //   stream >> model_name;
+  //   stream >> M;
+  //
+  //   model_names.push_back(model_name);
+  //   T_wo.emplace_back(Sophus::SO3d(M.block<3, 3>(0, 0)),
+  //                     M.block<3, 1>(0, 3));
+  //   model_poses_done = !(isalpha(stream.peek()));
+  //   cout << model_name << endl << M << endl;
+  // }
 
-  while (!model_poses_done) {
-    stream >> model_name;
+  while (stream >> model_name && model_name.compare("camera") != 0) {
     stream >> M;
-
     model_names.push_back(model_name);
     T_wo.emplace_back(Sophus::SO3d(M.block<3, 3>(0, 0)),
                       M.block<3, 1>(0, 3));
-    model_poses_done = !(isalpha(stream.peek()));
-    cout << model_name << endl << M << endl;
+    // cout << model_name << endl << M << endl;
   }
 
-  T_wc.reserve(total_frames);
+  T_wd.reserve(total_frames);
 
   while (stream >> M) {
-    T_wc.emplace_back(Sophus::SO3d(M.block<3, 3>(0, 0)),
+    T_wd.emplace_back(Sophus::SO3d(M.block<3, 3>(0, 0)),
                       M.block<3, 1>(0, 3));
   }
 
-  if (T_wc.size() != total_frames) {
-    printf("We have %zu transforms and %d frames -- mismatch\n", T_wc.size(),
+  if (T_wd.size() != total_frames) {
+    printf("We have %zu transforms and %d frames -- mismatch\n", T_wd.size(),
            total_frames);
     return false;
   }
@@ -101,7 +142,11 @@ bool SaveFrames(const string &video_file, const string &ground_truth,
 
   for (int ii = 0; ii < total_frames; ++ii) {
     for (int jj = 0; jj < num_models; ++jj) {
-      const Sophus::SE3d pose = T_wc[ii].inverse() * T_wo[jj];
+      // const Sophus::SE3d pose = T_wc[ii].inverse() * T_wo[jj];
+      // T_co[ii][jj] = pose.matrix().cast<float>();
+      const Sophus::SE3d T_do = T_wd[ii].inverse() * T_wo[jj];
+      // const Sophus::SE3d pose = T_cd * T_do;
+      const Sophus::SE3d pose = T_do;
       T_co[ii][jj] = pose.matrix().cast<float>();
     }
   }
@@ -139,7 +184,7 @@ bool SaveFrames(const string &video_file, const string &ground_truth,
     gt_stream << num_models << endl;
     for (int jj = 0; jj < num_models; ++jj) {
       gt_stream << model_names[jj] << endl;
-      gt_stream << T_co[ii][jj] << endl;
+      gt_stream << T_co[frame][jj] << endl;
     }
     gt_stream.close();
   }
@@ -218,7 +263,7 @@ int main (int argc, char **argv) {
     cout << scene_output_dir << endl;
     cout << scene_gt_file << endl;
     cout << scene_video_file << endl;
-    if (!SaveFrames(scene_video_file, scene_gt_file, scene_output_dir, 5)) {
+    if (!SaveFrames(scene_video_file, scene_gt_file, scene_output_dir, 10)) {
       return -1;
     }
   }

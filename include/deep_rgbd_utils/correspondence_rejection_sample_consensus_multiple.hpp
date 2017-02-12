@@ -43,7 +43,7 @@
 #include <boost/unordered_map.hpp>
 
 namespace {
-constexpr int NUM_RANSAC_MATCHES = 10;
+constexpr int NUM_RANSAC_MATCHES = 5;
 }
 
 

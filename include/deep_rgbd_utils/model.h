@@ -2,18 +2,8 @@
 
 #include <deep_rgbd_utils/helpers.h>
 
-#include <pcl/io/io.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/io/png_io.h>
-#include <pcl/io/vtk_lib_io.h>
 #include <pcl/common/common.h>
-#include <pcl/console/print.h>
 
-#include <pcl/conversions.h>
-#include <pcl/filters/filter.h>
-#include <pcl_ros/transforms.h>
-#include <pcl/PCLPointCloud2.h>
-#include <pcl_conversions/pcl_conversions.h>
 
 namespace dru {
   
@@ -24,14 +14,14 @@ namespace dru {
         SetMeans(means_file);
       }
       void SetMeans(const std::string& means_file);
-      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud() {
+      pcl::PointCloud<pcl::PointXYZ>::Ptr cloud() const {
         return cloud_;
       }
 
-      std::vector<float> GetModelMeanFeature();
+      std::vector<float> GetModelMeanFeature() const;
 
       std::vector<pcl::PointXYZ> GetNearestPoints(int num_neighbors,
-                                          const FeatureVector &feature_vector);
+                                          const FeatureVector &feature_vector) const;
 
     PointCloudPtr GetHeatmapCloud(const FeatureVector &feature_vector);
 

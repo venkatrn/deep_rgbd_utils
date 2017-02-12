@@ -68,9 +68,8 @@ std::vector<PointValuePair> Image::GetMaxima(
 }
 
 void Image::GetHeatmap(const FeatureVector &feature_vector, cv::Mat &heatmap,
-                       cv::Mat &raw_distance_map, std::vector<int> dim_idxs,
+                       cv::Mat &distance_map, std::vector<int> dim_idxs,
                        double sigma, double alpha) const {
-  cv::Mat distance_map;
   distance_map.create(image_.rows, image_.cols, CV_64FC1);
 
   // Generate distance_map.

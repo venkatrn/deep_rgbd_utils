@@ -14,12 +14,21 @@ set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} /home/venkatrn/research/caffe/cmake)
 # set(CMAKE_COLOR_MAKEFILE ON)
-set(ROS_COMPILE_FLAGS "-W -Wno-reorder")
+set(ROS_COMPILE_FLAGS "-W -Wno-reorder -fPIC")
 
 # find_package(Caffe REQUIRED)
 set(Caffe_DIR /home/venkatrn/research/caffe)
 set(Caffe_INCLUDE_DIRS /home/venkatrn/research/caffe/include/ /home/venkatrn/research/caffe/build/include/)
 set(Caffe_LIBRARIES /home/venkatrn/research/caffe/build/lib/libcaffe.so)
+
+set(L2S_ROOT "/home/venkatrn/research/learningToSee")
+include_directories(${L2S_ROOT}/include)
+link_libraries(${L2S_ROOT}/build/liblearningToSee.a)
+
+set(SUITESPARSE_INCLUDE_DIRS "/usr/include/suitesparse" CACHE PATH "suitesparse include directory")
+set(SUITESPARSE_LIBRARIES "cholmod;metis")
+include_directories(${SUITESPARSE_INCLUDE_DIRS})
+link_libraries(${SUITESPARSE_LIBRARIES})
 
 # find_package(PCL 1.7 REQUIRED COMPONENTS common io)
 # include_directories(${PCL_INCLUDE_DIRS})
@@ -88,6 +97,7 @@ add_library(${PROJECT_NAME}
   src/feature_generator_net.cpp
   src/image.cpp
   src/ransac.cpp
+  src/pose_estimator.cpp
   src/correspondence_rejection_sample_consensus_multiple.cpp
   src/model.cpp
   src/helpers.cpp)
@@ -104,3 +114,6 @@ target_link_libraries(vertex_net ${PROJECT_NAME})
 
 add_executable(dataset_generator tools/dataset_generator.cpp)
 target_link_libraries(dataset_generator ${PROJECT_NAME})
+
+add_executable(run_experiments tools/run_experiments.cpp)
+target_link_libraries(run_experiments ${PROJECT_NAME})
