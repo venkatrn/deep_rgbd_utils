@@ -25,6 +25,23 @@ set(L2S_ROOT "/home/venkatrn/research/learningToSee")
 include_directories(${L2S_ROOT}/include)
 link_libraries(${L2S_ROOT}/build/liblearningToSee.a)
 
+find_path(dart_ROOT NAMES lib/libdart.so src/tracker.h HINTS
+  /home/venkatrn/research/dart)
+set(dart_INCLUDE_DIRS ${dart_ROOT}/src)
+set(dart_LIBRARY_DIRS ${dart_ROOT}/lib)
+set(dart_LIBRARIES dart)
+include_directories(${dart_ROOT}/src)
+link_directories(${dart_ROOT}/lib)
+link_libraries(dart)
+
+set(YCB_ROOT "/home/venkatrn/research/ycb")
+include_directories(${YCB_ROOT}/include)
+link_libraries(${YCB_ROOT}/lib/libycb.so)
+
+set(XFUSION_ROOT "/home/venkatrn/research/xfusion")
+include_directories(${XFUSION_ROOT}/include)
+link_libraries(${XFUSION_ROOT}/lib/libxFusion.so)
+
 set(SUITESPARSE_INCLUDE_DIRS "/usr/include/suitesparse" CACHE PATH "suitesparse include directory")
 set(SUITESPARSE_LIBRARIES "cholmod;metis")
 include_directories(${SUITESPARSE_INCLUDE_DIRS})
@@ -69,7 +86,8 @@ CMAKE_FORCE_CXX_COMPILER(mpicxx ${CMAKE_CXX_COMPILER_ID})
 include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} ${Caffe_INCLUDE_DIRS}
   ${CUDA_INCLUDE_DIRS})
-include_directories(${Pangolin_INCLUDE_DIR} ${Pangolin_CONFIG_INCLUDE_DIR})
+include_directories(${Pangolin_INCLUDE_DIR} ${Pangolin_CONFIG_INCLUDE_DIR} 
+  ${CUDA_TOOLKIT_ROOT_DIR}/samples/common/inc)
 include_directories(${Sophus_INCLUDE_DIR})
 include_directories(MPI_INCLUDE_PATH)
 

@@ -114,7 +114,8 @@ void GetTransforms(const Image &rgb_image, const Image &depth_image,
       img_feature[29] = 0;
       img_feature[30] = 0;
       img_feature[31] = 0;
-      auto matches = model.GetNearestPoints(1, img_feature);
+      vector<int> nn_indices;
+      auto matches = model.GetNearestPoints(1, img_feature, &nn_indices);
       pcl::PointXYZ model_point = matches[0];
 
       image_cloud->points.push_back(img_point);
@@ -240,7 +241,8 @@ void CVCallback(int event, int x, int y, int flags, void *userdata) {
 
     // printf("Getting colored cloud\n");
     colored_cloud_ = coffee_model.GetHeatmapCloud(feature);
-    auto closest_points = coffee_model.GetNearestPoints(1, feature);
+    vector<int> nn_indices;
+    auto closest_points = coffee_model.GetNearestPoints(1, feature, &nn_indices);
     pcl::PointXYZ closest_model_point = closest_points[0];
     const int row_idx = click_counter_ % kNumMatchesForPnP;
     image_points_.at<double>(row_idx, 0) = x;

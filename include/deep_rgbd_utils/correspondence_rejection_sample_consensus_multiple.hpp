@@ -100,6 +100,7 @@ pcl::registration::CorrespondenceRejectorSampleConsensusMultiple<PointT>::getRem
     if (!sac.computeModel ()) {
       remaining_correspondences = original_correspondences;
       best_transformation_.setIdentity ();
+      printf("RANSAC Error: could not compute model\n");
       return;
     } else {
       if (refine_ && !sac.refineModel ()) {
@@ -113,7 +114,8 @@ pcl::registration::CorrespondenceRejectorSampleConsensusMultiple<PointT>::getRem
       if (inliers.size () < 3) {
         remaining_correspondences = original_correspondences;
         best_transformation_.setIdentity ();
-        return;
+        printf("RANSAC Error: number of inliers below 3\n");
+        // return;
       }
 
       boost::unordered_map<int, int> index_to_correspondence;

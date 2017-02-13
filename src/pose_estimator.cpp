@@ -10,6 +10,7 @@
 #include <pcl/registration/transformation_estimation_svd.h>
 // #include <pcl/registration/correspondence_rejection_sample_consensus.h>
 #include <deep_rgbd_utils/correspondence_rejection_sample_consensus_multiple.h>
+#include <l2s/image/depthFilling.h>
 
 #include <iostream>
 #include <fstream>
@@ -23,15 +24,19 @@ using namespace flann;
 using high_res_clock = std::chrono::high_resolution_clock;
 
 namespace {
-  // TODO: receive from caller.
-std::vector<std::string> kYCBObjects = {"002_master_chef_can", "006_mustard_bottle", "008_pudding_box", "024_bowl", "052_extra_large_clamp"}; 
+// TODO: receive from caller.
+std::vector<std::string> kYCBObjects = {"002_master_chef_can", "003_cracker_box",
+                                        "004_sugar_box", "005_tomato_soup_can", "006_mustard_bottle", "007_tuna_fish_can", "008_pudding_box", "009_gelatin_box", "010_potted_meat_can", "011_banana",  "019_pitcher_base", "021_bleach_cleanser", "024_bowl", "025_mug", "035_power_drill", "036_wood_block", "037_scissors", "040_large_marker", "051_large_clamp", "052_extra_large_clamp", "061_foam_brick"
+                                       };
 
 const string kCaffeWeights =
-  "/home/venkatrn/research/dense_features/denseCorrespondence-lov/snap_iter_17500.caffemodel";
+  "/home/venkatrn/research/dense_features/denseCorrespondence-lov/snap_iter_19100.caffemodel";
 const string kCaffeProto =
   "/home/venkatrn/research/dense_features/denseCorrespondence-lov/deploy_cpp.prototxt";
 const string kMeansFolder = "/home/venkatrn/research/dense_features/means/lov";
 
+const uint16_t kMaxDepth = 2000;
+const unsigned char kObjectMaskThresh = 200;
 } // namespace
 
 namespace dru {
@@ -39,7 +44,7 @@ namespace dru {
 PoseEstimator::PoseEstimator() :
   generator_(std::unique_ptr<FeatureGenerator>(new FeatureGenerator(kCaffeProto,
                                                                     kCaffeWeights))) {
-  for (const string& object : kYCBObjects) {
+  for (const string &object : kYCBObjects) {
     const string model_means_file = kMeansFolder + "/" + object + ".means";
     model_means_map_.insert(make_pair<string, Model>(object.c_str(), Model()));
     model_means_map_[object].SetMeans(model_means_file);
@@ -60,12 +65,14 @@ vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(
 
   // Run the feature generator.
   vector<FeatureVector> features;
+
   if (using_depth_) {
     features = generator_->GetFeatures(rgb_img.image(), depth_img.image());
 
   } else {
     features = generator_->GetFeatures(rgb_img.image());
   }
+
   rgb_img.SetFeatures(features);
 
 
@@ -118,11 +125,13 @@ void PoseEstimator::DrawProjection(const Image &rgb_image, const Model &model,
 
     // cv::circle(disp_image, projected_points[ii], 1, cv::Scalar(0, 255, 255), -1);
     if (projected_points[ii].x < 0 || projected_points[ii].y < 0 ||
-        projected_points[ii].x >= rgb_image.image().cols || projected_points[ii].y >= rgb_image.image().rows) {
+        projected_points[ii].x >= rgb_image.image().cols ||
+        projected_points[ii].y >= rgb_image.image().rows) {
       continue;
     }
-    auto &pixel = 
-    disp_image.at<cv::Vec3b>(projected_points[ii].y, projected_points[ii].x);
+
+    auto &pixel =
+      disp_image.at<cv::Vec3b>(projected_points[ii].y, projected_points[ii].x);
     pixel[0] = 0;
     pixel[1] = 255;
     pixel[2] = 255;
@@ -143,18 +152,28 @@ void PoseEstimator::GetTransforms(const Image &rgb_image,
 
 
 
+  // cv::Mat filled_depth_image = depth_image.image().clone();
+  // filled_depth_image.convertTo(filled_depth_image, CV_32FC1);
+  // filled_depth_image = filled_depth_image / 1000.0;
+  // l2s::ImageXYCf l2s_depth_image(filled_depth_image.cols, filled_depth_image.rows, 1, (float*)filled_depth_image.data);
+  // l2s::fillDepthImageRecursiveMedianFilter(l2s_depth_image, 2);
+  // filled_depth_image = filled_depth_image * 1000.0;
+  // filled_depth_image.convertTo(filled_depth_image, CV_16UC1);
+
+
   high_res_clock::time_point routine_begin_time = high_res_clock::now();
   const auto &model_mean = model.GetModelMeanFeature();
   // TODO: clean up.
   std::vector<int> dims = {29, 30, 31};
   cv::Mat obj_mask, distance_map;
-  rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, 1e-3, 1.0);
+  // rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, 1e-3, 1.0);
+  rgb_image.GetHeatmap(model_mean, obj_mask, distance_map, dims, 1e-3, 1.0);
 
   // Binarize the mask
   cv::Mat obj_mask_binary;
   cv::normalize(distance_map, distance_map, 0, 255, cv::NORM_MINMAX);
   distance_map.convertTo(distance_map, CV_8UC1);
-  cv::threshold(distance_map, obj_mask_binary, 180, 255, CV_THRESH_BINARY);
+  cv::threshold(distance_map, obj_mask_binary, kObjectMaskThresh, 255, CV_THRESH_BINARY);
 
   // cv::imshow("obj_mask", obj_mask_binary);
   if (Verbose()) {
@@ -165,17 +184,20 @@ void PoseEstimator::GetTransforms(const Image &rgb_image,
   // Form the sample consensus method
   pcl::PointCloud<pcl::PointXYZ>::Ptr image_cloud(new
                                                   pcl::PointCloud<pcl::PointXYZ>);
-  pcl::PointCloud<pcl::PointXYZ>::Ptr model_cloud(new
-                                                  pcl::PointCloud<pcl::PointXYZ>);
+  // pcl::PointCloud<pcl::PointXYZ>::Ptr model_cloud(new
+  //                                                 pcl::PointCloud<pcl::PointXYZ>);
   const auto &img = rgb_image.image();
-  int idx = 0;
+  // int idx = 0;
 
   pcl::Correspondences correspondences;
 
+  vector<FeatureVector> img_features;
+  img_features.reserve(img.rows * img.cols);
   for (int row = 0; row < img.rows; ++row) {
     for (int col = 0; col < img.cols; ++col) {
       if (obj_mask_binary.at<uchar>(row, col) == 0 ||
-          depth_image.at<uint16_t>(row, col) == 0) {
+          depth_image.at<uint16_t>(row, col) == 0 ||
+          depth_image.at<uint16_t>(row, col) > kMaxDepth) {
         continue;
       }
 
@@ -186,35 +208,56 @@ void PoseEstimator::GetTransforms(const Image &rgb_image,
       img_feature[29] = 0;
       img_feature[30] = 0;
       img_feature[31] = 0;
-      auto matches = model.GetNearestPoints(1, img_feature);
-      pcl::PointXYZ model_point = matches[0];
-
+      img_features.push_back(img_feature);
       image_cloud->points.push_back(img_point);
-      model_cloud->points.push_back(model_point);
+
+      // vector<int> nn_indices;
+      // auto matches = model.GetNearestPoints(1, img_feature, &nn_indices);
+      // pcl::PointXYZ model_point = matches[0];
+      // int nearest_idx = nn_indices[0];
+
+      // model_cloud->points.push_back(model_point);
       // TODO: the distance argument might be useful in other correspondence
       // routines.
-      correspondences.push_back(pcl::Correspondence(idx, idx, 0.0));
-      ++idx;
+      // correspondences.push_back(pcl::Correspondence(idx, idx, 0.0));
+
+      // correspondences.push_back(pcl::Correspondence(idx, nearest_idx, 0.0));
+      // ++idx;
     }
   }
 
+  vector<vector<int>> nn_indices;
+  model.GetNearestPoints(1, img_features, &nn_indices);
+
+  for (size_t ii = 0; ii < img_features.size(); ++ii) {
+    int nearest_idx = nn_indices[ii][0];
+    correspondences.push_back(pcl::Correspondence(ii, nearest_idx, 0.0));
+  }
+
   image_cloud->width = 1;
-  image_cloud->height = idx;
+  image_cloud->height = img_features.size();
   image_cloud->is_dense = false;
-  model_cloud->width = 1;
-  model_cloud->height = idx;
-  model_cloud->is_dense = false;
+  // model_cloud->width = 1;
+  // model_cloud->height = idx;
+  // model_cloud->is_dense = false;
+
+  auto feature_time = std::chrono::duration_cast<std::chrono::duration<double>>
+                     (high_res_clock::now() - routine_begin_time);
+  cout << "Feature matching took " << feature_time.count() << endl;
 
   pcl::registration::CorrespondenceRejectorSampleConsensusMultiple<pcl::PointXYZ>
   sac;
   // sac.setInputSource(model_cloud);
   // sac.setInputTarget(image_cloud);
+  // sac.setInputTarget(model_cloud);
+  // sac.setInputSource(image_cloud);
+  // sac.setInputTarget(model.cloud());
   sac.setInputSource(image_cloud);
-  sac.setInputTarget(model_cloud);
+  sac.setInputTarget(model.cloud());
   high_res_clock::time_point ransac_begin_time = high_res_clock::now();
   // sac.setMaximumIterations(10000);
   sac.setMaximumIterations(1000);
-  sac.setInlierThreshold(0.01);
+  sac.setInlierThreshold(0.02);
   sac.setRefineModel(false);
   // sac.setSaveInliers(true);
 

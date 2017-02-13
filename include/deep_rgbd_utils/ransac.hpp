@@ -73,7 +73,8 @@ pcl::RandomSampleConsensusMultiple<PointT, num_matches>::computeModel (int)
   const unsigned max_skip = max_iterations_ * 10;
   
   // Iterate
-  while (iterations_ < k && skipped_count < max_skip)
+  // while (iterations_ < k && skipped_count < max_skip)
+  while (iterations_ < max_iterations_ && skipped_count < max_skip)
   {
     // Get X samples which satisfy the model criteria
     sac_model_->getSamples (iterations_, selection);

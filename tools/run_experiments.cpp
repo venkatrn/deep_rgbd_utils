@@ -95,6 +95,9 @@ int main(int argc, char **argv) {
 
   boost::filesystem::directory_iterator dataset_it(dataset_dir), dataset_end;
 
+  PoseEstimator pose_estimator;
+  pose_estimator.UseDepth(false);
+
   for (dataset_it; dataset_it != dataset_end; ++dataset_it) {
     // Skip non-video folders (assuming every folder that contains "00" is video folder).
     if (dataset_it->path().filename().string().find("00") == std::string::npos) {
@@ -162,9 +165,6 @@ int main(int argc, char **argv) {
           continue;
         }
       }
-
-      PoseEstimator pose_estimator;
-      pose_estimator.UseDepth(false);
 
       const string scene = dataset_it->path().stem().string();
       const string image_num = scene_it->path().stem().string();

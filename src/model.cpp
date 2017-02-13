@@ -116,7 +116,9 @@ void Model::SetMeans(const std::string &means_file) {
   BuildKDTreeIndex(shape_features, kd_tree_index_);
 }
 std::vector<pcl::PointXYZ> Model::GetNearestPoints(int num_neighbors,
-                                                   const FeatureVector &feature_vector) const {
+                                                   const FeatureVector &feature_vector,
+                                                   std::vector<int>* model_indices) const {
+  model_indices->clear();
   flann::Matrix<float> query_matrix;
   query_matrix = VectorToFlann<float>(feature_vector);
   std::vector<std::vector<int>> k_indices(1);
@@ -125,13 +127,27 @@ std::vector<pcl::PointXYZ> Model::GetNearestPoints(int num_neighbors,
   k_distances[0].resize(num_neighbors);
   kd_tree_index_->knnSearch(query_matrix, k_indices, k_distances,
                               num_neighbors, flann::SearchParams(-1));
-  vector<pcl::PointXYZ> matches;
-  // matches.reserve(num_neighbors);
+  vector<pcl::PointXYZ> matches(num_neighbors);
+  model_indices->resize(num_neighbors);
 
   for (size_t ii = 0; ii < num_neighbors; ++ii) {
-    matches.push_back(cloud_->points[k_indices[0][ii]]);
+    matches[ii] = cloud_->points[k_indices[0][ii]];
+    model_indices->at(ii) = k_indices[0][ii];
   }
   return matches;
+}
+
+void Model::GetNearestPoints(int num_neighbors,
+                                                   const std::vector<FeatureVector> &feature_vectors,
+                                                   std::vector<std::vector<int>>* model_indices) const {
+  model_indices->clear();
+  flann::Matrix<float> query_matrix;
+  query_matrix = VectorToFlann<float>(feature_vectors);
+  std::vector<std::vector<int>> k_indices(feature_vectors.size(), std::vector<int>(num_neighbors, 0));
+  std::vector<std::vector<float>> k_distances(feature_vectors.size(), std::vector<float>(num_neighbors, 0.0));
+  kd_tree_index_->knnSearch(query_matrix, k_indices, k_distances,
+                              num_neighbors, flann::SearchParams(-1));
+  *model_indices = k_indices;
 }
 
 PointCloudPtr Model::GetHeatmapCloud(const FeatureVector &feature_vector) {

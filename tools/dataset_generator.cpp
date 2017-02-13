@@ -5,10 +5,14 @@
 
 #include <Eigen/Core>
 #include <boost/filesystem.hpp>
+#include <df/camera/rig.h>
+#include <dataset_manager.h>
 #include <pangolin/pangolin.h>
 #include <sophus/se3.hpp>
 
 using namespace std;
+
+string rig_file = "";
 
 // bool DatasetManager::ParseRigFile(const std::string &rig_file,
 //                                   Sophus::SE3d &T_cd) {
@@ -39,24 +43,24 @@ using namespace std;
 //   return true;
 // }
 
-template <typename Derived>
-inline std::istream &operator >>(std::istream &stream,
-                                 Eigen::MatrixBase<Derived> &M) {
-  for (int r = 0; r < M.rows(); ++r) {
-    for (int c = 0; c < M.cols(); ++c) {
-      if (! (stream >> M(r, c))) {
-        return stream;
-      }
-    }
-  }
-
-  // Strip newline character.
-  if (stream.peek() == 10) {
-    stream.ignore(1, '\n');
-  }
-
-  return stream;
-}
+// template <typename Derived>
+// inline std::istream &operator >>(std::istream &stream,
+//                                  Eigen::MatrixBase<Derived> &M) {
+//   for (int r = 0; r < M.rows(); ++r) {
+//     for (int c = 0; c < M.cols(); ++c) {
+//       if (! (stream >> M(r, c))) {
+//         return stream;
+//       }
+//     }
+//   }
+//
+//   // Strip newline character.
+//   if (stream.peek() == 10) {
+//     stream.ignore(1, '\n');
+//   }
+//
+//   return stream;
+// }
 
 // Save the depth and RGB frames from *.pango video to the respective
 // directories, and the frame-wise ground truths in gt_dir. Frames will equispaced based on
@@ -65,8 +69,9 @@ bool SaveFrames(const string &video_file, const string &ground_truth,
                 const string &rgb_dir, const string &depth_dir, const string &gt_dir,
                 int num_frames_to_save = -1) {
   // TODO: read from rig
-  // Sophus::SE3d T_cd;
-  // ParseRigFile("/home/venkatrn/research/ycb/asusRegistered.json", T_cd);
+  Sophus::SE3d T_cd;
+  std::unique_ptr<df::Rig<double>> rig;
+  ycb::DatasetManager::ParseRigFile(rig_file, rig, T_cd);
 
   pangolin::VideoInput video(video_file);
   pangolin::VideoPlaybackInterface *playback =
@@ -145,8 +150,8 @@ bool SaveFrames(const string &video_file, const string &ground_truth,
       // const Sophus::SE3d pose = T_wc[ii].inverse() * T_wo[jj];
       // T_co[ii][jj] = pose.matrix().cast<float>();
       const Sophus::SE3d T_do = T_wd[ii].inverse() * T_wo[jj];
-      // const Sophus::SE3d pose = T_cd * T_do;
-      const Sophus::SE3d pose = T_do;
+      const Sophus::SE3d pose = T_cd * T_do;
+      // const Sophus::SE3d pose = T_do;
       T_co[ii][jj] = pose.matrix().cast<float>();
     }
   }
@@ -231,13 +236,14 @@ bool SaveFrames(const string& video_file_str, const string& gt_file_str, const s
 }
 
 int main (int argc, char **argv) {
-  if (argc < 3) {
-    cerr << "Usage: ./dataset_generator <path_to_videos_folder> <path_to_output_dir>"
+  if (argc < 4) {
+    cerr << "Usage: ./dataset_generator <path_to_videos_folder> <rig_file> <path_to_output_dir>"
          << endl;
     return -1;
   }
   boost::filesystem::path videos_dir = argv[1];
-  boost::filesystem::path output_dir = argv[2];
+  rig_file = argv[2];
+  boost::filesystem::path output_dir = argv[3];
 
   if (!boost::filesystem::is_directory(videos_dir)) {
     cerr << "Invalid videos directory" << endl;

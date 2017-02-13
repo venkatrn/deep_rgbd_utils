@@ -23,16 +23,16 @@ using PointValuePair = std::pair<cv::Point, double>;
 // constexpr double kPrincipalPointY = 243.335;
 
 // CMU Dataset
-// constexpr double kFocalLengthColorX = 1077.7606;
-// constexpr double kFocalLengthColorY = 1078.189;
-// constexpr double kPrincipalPointX = 323.7872;
-// constexpr double kPrincipalPointY = 279.6921;
+constexpr double kFocalLengthColorX = 1077.7606;
+constexpr double kFocalLengthColorY = 1078.189;
+constexpr double kPrincipalPointX = 323.7872;
+constexpr double kPrincipalPointY = 279.6921;
 
 // UW Dataset
-constexpr double kFocalLengthColorX = 1066.778;
-constexpr double kFocalLengthColorY = 1067.487;
-constexpr double kPrincipalPointX = 312.9869;
-constexpr double kPrincipalPointY = 241.3109;
+// constexpr double kFocalLengthColorX = 1066.778;
+// constexpr double kFocalLengthColorY = 1067.487;
+// constexpr double kPrincipalPointX = 312.9869;
+// constexpr double kPrincipalPointY = 241.3109;
 // const static float K1 = 0.04112172;
 // const static float K2 = -0.4798174;
 // const static float K3 = 1.890084;
