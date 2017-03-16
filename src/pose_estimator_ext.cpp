@@ -1,14 +1,10 @@
 #include <deep_rgbd_utils/pose_estimator.h>
 #include <deep_rgbd_utils/helpers.h>
+#include <deep_rgbd_utils/cv_serialization.h>
 
-#include <sophus/se3.hpp>
 #include <pcl/common/transforms.h>
 
 #include <vector>
-#include <df/prediction/glRender.h>
-#include <df/prediction/glRenderTypes.h>
-#include <deep_rgbd_utils/image.h>
-#include <deep_rgbd_utils/model.h>
 
 #include <l2s/image/depthFilling.h>
 
@@ -28,6 +24,12 @@ typedef Eigen::Matrix<float, 3, 1, Eigen::DontAlign> Vec3f;
 Vec3f PointToVec(const pcl::PointXYZ &p) {
   Vec3f vec;
   vec << p.x, p.y, p.z;
+  return vec;
+}
+
+Vec3f PointToVec(const cv::Vec3f &p) {
+  Vec3f vec;
+  vec << p[0], p[1], p[2];
   return vec;
 }
 
@@ -218,79 +220,176 @@ double SensorProb(const double d_exp, const double d_obs) {
 
 double PoseEstimator::EvaluatePose(const Sophus::SE3d &T_sm,
                                    const cv::Mat &filled_depth_image_m,
-                                   const cv::Mat &object_probability_mask,
-                                   const string &model_name, const Model &model) {
-  // pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_cloud(new
-  //                                                       pcl::PointCloud<pcl::PointXYZ>);
-  // pcl::transformPointCloud(*model.cloud(), *transformed_cloud,
-  //                          T_sm.matrix().cast<float>());
+                                   const cv::Mat &object_probability_mask, const cv::Mat &object_binary_mask,
+                                   const string &model_name) {
   int rows = filled_depth_image_m.rows;
   int cols = filled_depth_image_m.cols;
-
-  // double score = 0.0;
-  // for (size_t ii = 0; ii < transformed_cloud->points.size(); ++ii) {
-  //   const auto &point = transformed_cloud->points[ii];
-  //   int cam_x = 0;
-  //   int cam_y = 0;
-  //   WorldToCam(point, cam_x, cam_y);
-  //
-  //   if (cam_x < 0 || cam_y < 0 || cam_x >= rows || cam_y >= cols) {
-  //     continue;
-  //   }
-  //
-  //   double expected_depth = point.z;
-  //   double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(cam_y, cam_x));
-  //
-  //   // if (projected_image.at<double>(cam_y, cam_x) > observed_depth) {
-  //   //   projected_image.at<double>(cam_y, cam_x) = observed_depth;
-  //   // }
-  //
-  //   if (fabs(observed_depth - expected_depth) < 0.01) {
-  //     score = score + 1;
-  //   }
-  // }
 
   cv::Mat projected_image;
   Eigen::Matrix4f pose;
   pose = T_sm.matrix().cast<float>();
   GetProjectedDepthImage(model_name, pose, projected_image);
-  // cv::imwrite(Prefix() + "proj.png", 100 * projected_image);
-
   double score = 0;
-
   double num_points = 0;
-  #pragma omp parallel for
 
   for (int y = 0; y < projected_image.rows; ++y) {
     for (int x = 0; x < projected_image.cols; ++x) {
       double expected_depth = static_cast<double>(projected_image.at<float>(y, x));
 
-      if (!(expected_depth <= 0 || std::isnan(expected_depth))) {
-        double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(y,
-                                                                                   x));
-        // cout << expected_depth << endl;
-        // score += log(SensorProb(expected_depth, observed_depth));
-        double prob = log(SensorProb(expected_depth, observed_depth));
-        // TODO: get rid of arbitrary constant.
-        prob += log(std::max(object_probability_mask.at<double>(y, x), 1e-5));
-        // if (fabs(observed_depth - expected_depth) < 0.01) {
-        //   score = score + 1;
-        // }
-        #pragma omp critical
-        {
-          score += prob;
-          num_points = num_points + 1;
+      bool projected_pixel = expected_depth > 0 && !std::isnan(expected_depth);
+      bool mask_pixel = object_binary_mask.at<uchar>(y, x) != 0;
+
+      if (mask_pixel) {
+        if (projected_pixel) {
+          double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(y,
+                                                                                     x));
+          const double error = (expected_depth - observed_depth);
+          const double sq_error = error * error;
+          score -= sq_error;
+        } else {
+          score -= 1.0;
         }
       }
     }
   }
+  return score;
+}
 
-  if (num_points == 0) {
+double PoseEstimator::EvaluatePoseSDF(const Sophus::SE3d &T_sm,
+                                   const cv::Mat &filled_depth_image_m,
+                                   const cv::Mat &object_probability_mask, const cv::Mat &object_binary_mask,
+                                   const string &model_name) {
+  int rows = filled_depth_image_m.rows;
+  int cols = filled_depth_image_m.cols;
+
+  Eigen::Matrix4f T_ms = T_sm.inverse().matrix().cast<float>();
+
+  cv::Mat projected_image;
+  Eigen::Matrix4f pose;
+  pose = T_sm.matrix().cast<float>();
+  GetProjectedDepthImage(model_name, pose, projected_image);
+  double score = 0;
+  double num_points = 0;
+
+  pcl::PointCloud<pcl::PointXYZ> cloud, transformed_cloud;
+  cloud.points.reserve(rows * cols);
+
+  for (int y = 0; y < rows; ++y) {
+    for (int x = 0; x < cols; ++x) {
+      bool mask_pixel = object_binary_mask.at<uchar>(y, x) != 0;
+      if (mask_pixel) {
+          double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(y,
+                                                                                     x));
+    pcl::PointXYZ cam_point, world_point;
+
+    cam_point = CamToWorld(x, y, filled_depth_image_m.at<float>(y, x));
+    cloud.points.push_back(cam_point);
+      }
+    }
+  }
+  cloud.width = cloud.points.size();
+  cloud.height = 1;
+  cloud.is_dense = false;
+  pcl::transformPointCloud(cloud, transformed_cloud, T_ms);
+
+  if (cloud.points.empty()) {
+    // TODO
     return -std::numeric_limits<double>::max();
   }
 
-  return score / std::max(num_points, 1.0);
+  const dart::Grid3D<float> & sdf = models_[model_name].getSdf(0);
+  for (size_t ii = 0; ii < transformed_cloud.points.size(); ++ii) {
+    const auto& point = transformed_cloud.points[ii];
+    float3 p = make_float3(point.x, point.y, point.z);
+    float3 grid_p = sdf.getGridCoords(p);
+    float df_val = 0.0;
+    if (!sdf.isInBoundsInterp(grid_p)) {
+      // TODO: make principled
+      df_val = fabs(sdf.getValue(make_int3(0, 0, 0)));
+    } else {
+      df_val = fabs(sdf.getValueInterpolated(grid_p));
+    }
+    // cout << sdf_val << endl;
+    score -= static_cast<double>(df_val);
+  }
+  return score;
 }
+
+// double PoseEstimator::EvaluatePose(const Sophus::SE3d &T_sm,
+//                                    const cv::Mat &filled_depth_image_m,
+//                                    const cv::Mat &object_probability_mask, const cv::Mat& object_binary_mask,
+//                                    const string &model_name, const Model &model) {
+//   // pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_cloud(new
+//   //                                                       pcl::PointCloud<pcl::PointXYZ>);
+//   // pcl::transformPointCloud(*model.cloud(), *transformed_cloud,
+//   //                          T_sm.matrix().cast<float>());
+//   int rows = filled_depth_image_m.rows;
+//   int cols = filled_depth_image_m.cols;
+//
+//   // double score = 0.0;
+//   // for (size_t ii = 0; ii < transformed_cloud->points.size(); ++ii) {
+//   //   const auto &point = transformed_cloud->points[ii];
+//   //   int cam_x = 0;
+//   //   int cam_y = 0;
+//   //   WorldToCam(point, cam_x, cam_y);
+//   //
+//   //   if (cam_x < 0 || cam_y < 0 || cam_x >= rows || cam_y >= cols) {
+//   //     continue;
+//   //   }
+//   //
+//   //   double expected_depth = point.z;
+//   //   double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(cam_y, cam_x));
+//   //
+//   //   // if (projected_image.at<double>(cam_y, cam_x) > observed_depth) {
+//   //   //   projected_image.at<double>(cam_y, cam_x) = observed_depth;
+//   //   // }
+//   //
+//   //   if (fabs(observed_depth - expected_depth) < 0.01) {
+//   //     score = score + 1;
+//   //   }
+//   // }
+//
+//   cv::Mat projected_image;
+//   Eigen::Matrix4f pose;
+//   pose = T_sm.matrix().cast<float>();
+//   GetProjectedDepthImage(model_name, pose, projected_image);
+//   // cv::imwrite(Prefix() + "proj.png", 100 * projected_image);
+//
+//   double score = 0;
+//
+//   double num_points = 0;
+//   #pragma omp parallel for
+//
+//   for (int y = 0; y < projected_image.rows; ++y) {
+//     for (int x = 0; x < projected_image.cols; ++x) {
+//       double expected_depth = static_cast<double>(projected_image.at<float>(y, x));
+//
+//       if (!(expected_depth <= 0 || std::isnan(expected_depth))) {
+//         double observed_depth = static_cast<double>(filled_depth_image_m.at<float>(y,
+//                                                                                    x));
+//         // cout << expected_depth << endl;
+//         // score += log(SensorProb(expected_depth, observed_depth));
+//         double prob = log(SensorProb(expected_depth, observed_depth));
+//         // TODO: get rid of arbitrary constant.
+//         // prob += log(std::max(object_probability_mask.at<double>(y, x), 1e-5));
+//         // if (fabs(observed_depth - expected_depth) < 0.01) {
+//         //   score = score + 1;
+//         // }
+//         #pragma omp critical
+//         {
+//           score += prob;
+//           num_points = num_points + 1;
+//         }
+//       }
+//     }
+//   }
+//
+//   if (num_points == 0) {
+//     return -std::numeric_limits<double>::max();
+//   }
+//
+//   return score / std::max(num_points, 1.0);
+// }
 
 int SampleFromCDF(const std::vector<double> &cdf) {
   if (cdf.empty()) {
@@ -393,32 +492,59 @@ void GenerateSample(const cv::Mat &integral_image,
 }
 
 
-void PoseEstimator::GetTopPoses(const Image &rgb_image,
-                                const Image &depth_image,
-                                const Model &model, const string &model_name, int num_poses,
+void PoseEstimator::GetTopPoses(const cv::Mat &img,
+                                const cv::Mat &depth_img,
+                                const string &model_name, int num_poses,
                                 vector<Eigen::Matrix4f> *poses, int num_trials) {
-  const cv::Mat &img = rgb_image.image();
-  const cv::Mat &depth_img = depth_image.image();
 
   high_res_clock::time_point routine_begin_time = high_res_clock::now();
 
   // Filter depth image.
-  cv::Mat filled_depth_image_m = depth_img.clone();
-  filled_depth_image_m.convertTo(filled_depth_image_m, CV_32FC1);
+  cv::Mat filled_depth_image_m;
+  depth_img.convertTo(filled_depth_image_m, CV_32FC1);
   filled_depth_image_m = filled_depth_image_m / 1000.0;
   l2s::ImageXYCf l2s_depth_image(filled_depth_image_m.cols,
                                  filled_depth_image_m.rows, 1, (float *)filled_depth_image_m.data);
   l2s::fillDepthImageRecursiveMedianFilter(l2s_depth_image, 2);
 
-  std::vector<int> dims = {29, 30, 31};
-  cv::Mat obj_mask, probability_map;
-  GetGMMMask(rgb_image, model_name, obj_mask, probability_map);
 
+  cv::Mat obj_labels, obj_probs, vert_preds, sliced_verts, heatmap,
+  probability_map;
+
+  string prob_file = debug_dir_ + "/" + im_num_ + "_probs.mat";
+  string vert_file = debug_dir_ + "/" + im_num_ + "_verts.mat";
+  loadMat(obj_probs, prob_file) ;
+  loadMat(vert_preds, vert_file);
+  const int object_idx = kObjectNameToIdx[model_name];
+  SlicePrediction(obj_probs, vert_preds, object_idx, probability_map,
+                  sliced_verts);
+  GetLabelImage(obj_probs, obj_labels);
+  cv::Mat obj_mask = cv::Mat::zeros(obj_labels.size(), CV_8UC1);
+  obj_mask.setTo(255, obj_labels == object_idx);
+
+  // ColorizeProbabilityMap(probability_map, object_labels);
+  // cv::imwrite(Prefix() + "b_labels.png", object_labels);
+
+  cv::Mat normalized, img_color;
+
+  // Normalize likelihood across image.
+  cv::normalize(probability_map, probability_map, 1.0, 0.0, cv::NORM_L1);
+
+  cv::normalize(probability_map, normalized, 0.0, 255.0, cv::NORM_MINMAX);
+  normalized.convertTo(normalized, CV_8UC1);
+  cv::applyColorMap(normalized, heatmap, cv::COLORMAP_JET);
+  double alpha = 1.0;
+  heatmap = alpha * heatmap + (1 - alpha) * img;
+
+  // Use the binary mask as probability map.
+  cv::Mat obj_mask_double;
+  obj_mask.convertTo(obj_mask_double, CV_64FC1);
+  cv::normalize(obj_mask_double, probability_map, 1.0, 0.0, cv::NORM_L1);
   cv::Mat integral_image;
   cv::integral(probability_map, integral_image);
 
-  cv::Mat normal_image;
-  GetNormalImage(filled_depth_image_m, normal_image);
+  // cv::Mat normal_image;
+  // GetNormalImage(filled_depth_image_m, normal_image);
 
   // cv::imwrite(Prefix() + "integral.png", 255 * integral_image);
 
@@ -431,9 +557,9 @@ void PoseEstimator::GetTopPoses(const Image &rgb_image,
   // cv::imshow("obj_mask", obj_mask_binary);
   if (Verbose()) {
     cv::imwrite(Prefix() + "a_rgb.png", img);
-    // cv::imwrite(Prefix() + "b_depth.png", filled_depth_image_m * 10);
-    cv::imwrite(Prefix() + "c_mask.png", obj_mask);
-    cv::imwrite(Prefix() + "d_normals.png", normal_image);
+    // cv::imwrite(Prefix() + "b_depth.png", filled_depth_image_m * 1000);
+    cv::imwrite(Prefix() + "c_mask.png", heatmap);
+    // cv::imwrite(Prefix() + "d_normals.png", normal_image);
     // cv::imwrite(Prefix() + "bin_mask.png", obj_mask_binary);
   }
 
@@ -444,92 +570,9 @@ void PoseEstimator::GetTopPoses(const Image &rgb_image,
   // cv::namedWindow("ransac");
   cv::Mat disp_image;
 
-
-  // num_trials = 1000;
+  num_trials = 1000;
   // Generate candidate poses
-  // vector<Sophus::SE3d> candidate_poses(num_trials);
-  // for (int trial = 0; trial < num_trials; ++trial) {
-  //   img.copyTo(disp_image);
-  //   int x1 = 0;
-  //   int y1 = 0;
-  //   int x2 = 0;
-  //   int y2 = 0;
-  //   int x3 = 0;
-  //   int y3 = 0;
-  //   GenerateSample(integral_image, x1, y1);
-  //
-  //   Eigen::Vector3f im_n2, im_n3;
-  //   Eigen::Vector3f im_n1(normal_image.at<cv::Vec3f>(y1, x1).val);
-  //
-  //   while (!(abs(x2 - x1) < 100 && abs(y2 - y1) < 100)) {
-  //     GenerateSample(integral_image, x2, y2);
-  //   }
-  //
-  //   while (!(abs(x3 - x1) < 100 && abs(y3 - y1) < 100)) {
-  //     GenerateSample(integral_image, x3, y3);
-  //   }
-  //
-  //   // printf("Sampl: (%d %d), (%d %d), (%d %d)\n", x1, y1, x2, y2, x3, y3);
-  //   // cv::circle(disp_image, cv::Point(x1, y1), 4, cv::Scalar(0,255,0), -1);
-  //   // cv::circle(disp_image, cv::Point(x2, y2), 4, cv::Scalar(0,255,0), -1);
-  //   // cv::circle(disp_image, cv::Point(x3, y3), 4, cv::Scalar(0,255,0), -1);
-  //   // cv::imshow("ransac", disp_image);
-  //   // cv::waitKey(0);
-  //
-  //   pcl::PointXYZ p1, p2, p3;
-  //   auto im_f1 = rgb_image.FeatureAt(x1, y1);
-  //   auto im_f2 = rgb_image.FeatureAt(x2, y2);
-  //   auto im_f3 = rgb_image.FeatureAt(x3, y3);
-  //
-  //   // TODO: clean up.
-  //   im_f1[29] = 0;
-  //   im_f1[30] = 0;
-  //   im_f1[31] = 0;
-  //   im_f2[29] = 0;
-  //   im_f2[30] = 0;
-  //   im_f2[31] = 0;
-  //   im_f3[29] = 0;
-  //   im_f3[30] = 0;
-  //   im_f3[31] = 0;
-  //   vector<FeatureVector> img_features;
-  //   img_features.push_back(im_f1);
-  //   img_features.push_back(im_f2);
-  //   img_features.push_back(im_f3);
-  //
-  //   p1 = CamToWorld(x1, y1, filled_depth_image_m.at<float>(y1, x1));
-  //   p2 = CamToWorld(x2, y2, filled_depth_image_m.at<float>(y2, x2));
-  //   p3 = CamToWorld(x3, y3, filled_depth_image_m.at<float>(y3, x3));
-  //   Vec3f v1, v2, v3;
-  //   v1 = PointToVec(p1);
-  //   v2 = PointToVec(p2);
-  //   v3 = PointToVec(p3);
-  //
-  //   vector<vector<int>> nn_indices;
-  //   vector<vector<float>> nn_distances;
-  //   model.GetNearestPoints(1, img_features, &nn_indices, &nn_distances);
-  //
-  //   pcl::PointXYZ m1, m2, m3;
-  //   m1 = model.cloud()->points[nn_indices[0][0]];
-  //   m2 = model.cloud()->points[nn_indices[1][0]];
-  //   m3 = model.cloud()->points[nn_indices[2][0]];
-  //
-  //   pcl::Normal n1, n2, n3;
-  //   n1 = model.normals()->points[nn_indices[0][0]];
-  //   n2 = model.normals()->points[nn_indices[1][0]];
-  //   n3 = model.normals()->points[nn_indices[2][0]];
-  //
-  //   Vec3f mv1, mv2, mv3;
-  //   mv1 = PointToVec(m1);
-  //   mv2 = PointToVec(m2);
-  //   mv3 = PointToVec(m3);
-  //
-  //   // Sophus::SE3d pose = ComputePose(vector<Vec3f>({mv1, mv2, mv3}), vector<Vec3f>({v1, v2, v3}));
-  //   Sophus::SE3d pose = ComputePose(vector<Vec3f>({v1, v2, v3}), vector<Vec3f>({mv1, mv2, mv3}));
-  //   candidate_poses[trial] = pose;
-  // }
-
-  num_trials = 55;
-  vector<Sophus::SE3d> candidate_poses;
+  vector<Sophus::SE3d> candidate_poses(num_trials);
 
   for (int trial = 0; trial < num_trials; ++trial) {
     img.copyTo(disp_image);
@@ -540,47 +583,122 @@ void PoseEstimator::GetTopPoses(const Image &rgb_image,
     int x3 = 0;
     int y3 = 0;
     GenerateSample(integral_image, x1, y1);
+    GenerateSample(integral_image, x2, y2);
+    GenerateSample(integral_image, x3, y3);
 
-    Vec3f im_n1(normal_image.at<cv::Vec3f>(y1, x1).val);
-    cout << im_n1 << endl;
+    // Eigen::Vector3f im_n2, im_n3;
+    // Eigen::Vector3f im_n1(normal_image.at<cv::Vec3f>(y1, x1).val);
 
-    pcl::PointXYZ p1;
-    auto im_f1 = rgb_image.FeatureAt(x1, y1);
+    // while (!(abs(x2 - x1) < 100 && abs(y2 - y1) < 100)) {
+    //   GenerateSample(integral_image, x2, y2);
+    // }
+    //
+    // while (!(abs(x3 - x1) < 100 && abs(y3 - y1) < 100)) {
+    //   GenerateSample(integral_image, x3, y3);
+    // }
 
-    // TODO: clean up.
-    im_f1[29] = 0;
-    im_f1[30] = 0;
-    im_f1[31] = 0;
-    vector<FeatureVector> img_features;
-    img_features.push_back(im_f1);
+    // printf("Sampl: (%d %d), (%d %d), (%d %d)\n", x1, y1, x2, y2, x3, y3);
+    // cv::circle(disp_image, cv::Point(x1, y1), 4, cv::Scalar(0,255,0), -1);
+    // cv::circle(disp_image, cv::Point(x2, y2), 4, cv::Scalar(0,255,0), -1);
+    // cv::circle(disp_image, cv::Point(x3, y3), 4, cv::Scalar(0,255,0), -1);
+    // cv::imshow("ransac", disp_image);
+    // cv::waitKey(0);
 
+    pcl::PointXYZ p1, p2, p3;
     p1 = CamToWorld(x1, y1, filled_depth_image_m.at<float>(y1, x1));
-    Vec3f v1;
+    p2 = CamToWorld(x2, y2, filled_depth_image_m.at<float>(y2, x2));
+    p3 = CamToWorld(x3, y3, filled_depth_image_m.at<float>(y3, x3));
+    Vec3f v1, v2, v3;
     v1 = PointToVec(p1);
+    v2 = PointToVec(p2);
+    v3 = PointToVec(p3);
 
-    vector<vector<int>> nn_indices;
-    vector<vector<float>> nn_distances;
-    model.GetNearestPoints(1, img_features, &nn_indices, &nn_distances);
+    pcl::PointXYZ m1, m2, m3;
+    auto cv_v1 = sliced_verts.at<cv::Vec3f>(y1, x1) / 10.0;
+    auto cv_v2 = sliced_verts.at<cv::Vec3f>(y2, x2) / 10.0;
+    auto cv_v3 = sliced_verts.at<cv::Vec3f>(y3, x3) / 10.0;
 
-    pcl::PointXYZ m1;
-    m1 = model.cloud()->points[nn_indices[0][0]];
-    Vec3f mv1;
-    mv1 = PointToVec(m1);
-
-    pcl::Normal mn;
-    mn = model.normals()->points[nn_indices[0][0]];
-    Vec3f model_normal(mn.normal_x, mn.normal_y, mn.normal_z);
+    Vec3f mv1, mv2, mv3;
+    mv1 = PointToVec(cv_v1);
+    mv2 = PointToVec(cv_v2);
+    mv3 = PointToVec(cv_v3);
+    // cout << "pred\n";
+    // cout << mv1 << endl;
+    // cout << mv2 << endl;
+    // cout << mv3 << endl;
+    // cout << "im point\n";
+    // cout << v1 << endl;
+    // cout << v2 << endl;
+    // cout << v3 << endl;
+    // cout << "im depth\n";
+    // cout << filled_depth_image_m.at<float>(y1,x1) << endl;
+    // cout << filled_depth_image_m.at<float>(y2,x2) << endl;
+    // cout << filled_depth_image_m.at<float>(y3,x3) << endl;
+    // cout << depth_img.at<uint16_t>(y1,x1) / 1000.0 << endl;
+    // cout << depth_img.at<uint16_t>(y2,x2) / 1000.0 << endl;
+    // cout << depth_img.at<uint16_t>(y3,x3) / 1000.0 << endl;
 
     // Sophus::SE3d pose = ComputePose(vector<Vec3f>({mv1, mv2, mv3}), vector<Vec3f>({v1, v2, v3}));
-    // Sophus::SE3d pose = ComputePose(vector<Vec3f>({v1, v2, v3}), vector<Vec3f>({mv1, mv2, mv3}));
-
-    vector<Sophus::SE3d> poses = ComputePoses(v1, im_n1, mv1, model_normal, 18);
-
-    for (size_t jj = 0; jj < poses.size(); ++jj) {
-      candidate_poses.push_back(poses[jj]);
-      // cout << poses[jj].matrix();
-    }
+    Sophus::SE3d pose = ComputePose(vector<Vec3f>({v1, v2, v3}), vector<Vec3f>({mv1, mv2, mv3}));
+    candidate_poses[trial] = pose;
   }
+
+
+  // EXPERIMENTAL ///////////////////////////////////////////////////////////
+  // num_trials = 55;
+  // vector<Sophus::SE3d> candidate_poses;
+  //
+  // for (int trial = 0; trial < num_trials; ++trial) {
+  //   img.copyTo(disp_image);
+  //   int x1 = 0;
+  //   int y1 = 0;
+  //   int x2 = 0;
+  //   int y2 = 0;
+  //   int x3 = 0;
+  //   int y3 = 0;
+  //   GenerateSample(integral_image, x1, y1);
+  //
+  //   Vec3f im_n1(normal_image.at<cv::Vec3f>(y1, x1).val);
+  //   cout << im_n1 << endl;
+  //
+  //   pcl::PointXYZ p1;
+  //   auto im_f1 = rgb_image.FeatureAt(x1, y1);
+  //
+  //   // TODO: clean up.
+  //   im_f1[29] = 0;
+  //   im_f1[30] = 0;
+  //   im_f1[31] = 0;
+  //   vector<FeatureVector> img_features;
+  //   img_features.push_back(im_f1);
+  //
+  //   p1 = CamToWorld(x1, y1, filled_depth_image_m.at<float>(y1, x1));
+  //   Vec3f v1;
+  //   v1 = PointToVec(p1);
+  //
+  //   vector<vector<int>> nn_indices;
+  //   vector<vector<float>> nn_distances;
+  //   model.GetNearestPoints(1, img_features, &nn_indices, &nn_distances);
+  //
+  //   pcl::PointXYZ m1;
+  //   m1 = model.cloud()->points[nn_indices[0][0]];
+  //   Vec3f mv1;
+  //   mv1 = PointToVec(m1);
+  //
+  //   pcl::Normal mn;
+  //   mn = model.normals()->points[nn_indices[0][0]];
+  //   Vec3f model_normal(mn.normal_x, mn.normal_y, mn.normal_z);
+  //
+  //   // Sophus::SE3d pose = ComputePose(vector<Vec3f>({mv1, mv2, mv3}), vector<Vec3f>({v1, v2, v3}));
+  //   // Sophus::SE3d pose = ComputePose(vector<Vec3f>({v1, v2, v3}), vector<Vec3f>({mv1, mv2, mv3}));
+  //
+  //   vector<Sophus::SE3d> poses = ComputePoses(v1, im_n1, mv1, model_normal, 18);
+  //
+  //   for (size_t jj = 0; jj < poses.size(); ++jj) {
+  //     candidate_poses.push_back(poses[jj]);
+  //     // cout << poses[jj].matrix();
+  //   }
+  // }
+  // EXPERIMENTAL ///////////////////////////////////////////////////////////
 
 
   vector<PoseCandidate> candidates(candidate_poses.size());
@@ -588,8 +706,8 @@ void PoseEstimator::GetTopPoses(const Image &rgb_image,
   for (size_t ii = 0; ii < candidate_poses.size(); ++ii) {
     double score = 0;
     const auto &pose = candidate_poses[ii];
-    score = EvaluatePose(pose, filled_depth_image_m, smoothed_likelihood,
-                         model_name, model);
+    score = EvaluatePoseSDF(pose, filled_depth_image_m, smoothed_likelihood, obj_mask,
+                         model_name);
     candidates[ii].pose = pose;
     candidates[ii].score = score;
     // cout << pose.matrix() << endl;
@@ -607,25 +725,19 @@ void PoseEstimator::GetTopPoses(const Image &rgb_image,
   std::transform(candidates.begin(), candidates.begin() + num_poses_to_return,
   poses->begin(), [](const PoseCandidate & p) {
     cout << p.score << endl;
-    cout << p.pose.matrix();
-    return p.pose.matrix().cast<float>();
+    cout << p.pose.matrix() << endl;
+    const auto pose = p.pose.matrix().cast<float>();
+    return pose;
+  });
+
+  ransac_scores_.resize(candidate_poses.size());
+  std::transform(candidates.begin(), candidates.begin() + num_poses_to_return,
+  ransac_scores_.begin(), [](const PoseCandidate & p) {
+    return p.score;
   });
 
   auto current_time = high_res_clock::now();
   auto routine_time = std::chrono::duration_cast<std::chrono::duration<double>>
                       (current_time - routine_begin_time);
   cout << "Pose estimation took " << routine_time.count() << endl;
-
-
-  // Get probability map
-  // For n iterations
-  // Generate random sample 1 and find match
-  // while (constraint not satisfied)
-  // Generate random sample 2 within threshold of sample 1 and find match
-  // check constraint
-  // Repeat above for sample 3 vs sample 1
-  // Get pose using 3 samples
-  // Evaluate pose
-  // Add to pose list
-  // Return the top poses
 }

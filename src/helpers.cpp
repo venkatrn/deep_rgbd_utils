@@ -6,9 +6,17 @@
 #include <pcl/PCLPointCloud2.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <opencv2/contrib/contrib.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+
 #include <algorithm>
 
 using namespace std;
+
+namespace {
+  const int kNumClasses = 22;
+}
 
 namespace dru {
 
@@ -129,5 +137,56 @@ void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& m
   for(int ii = 0; ii < array2d.size(); ++ii) {
         mat.row(ii) = cv::Mat(array2d[ii]).t();
   }
+}
+
+void GetLabelImage(const cv::Mat &obj_probs, cv::Mat &labels) {
+  labels.create(kColorHeight, kColorWidth, CV_8UC1);
+
+  for (int ii = 0; ii < kColorHeight; ++ii) {
+    for (int jj = 0; jj < kColorWidth; ++jj) {
+      typedef cv::Vec<float, kNumClasses> ProbVec;
+      auto prob_vec = obj_probs.at<ProbVec>(ii, jj);
+      std::vector<float> scores(prob_vec.val, prob_vec.val + kNumClasses);
+
+      int argmax = 0;
+      Argmax(scores, &argmax);
+      labels.at<uchar>(ii, jj) = argmax;
+    }
+  }
+}
+
+bool SlicePrediction(const cv::Mat &obj_probs,
+                                const cv::Mat &vertex_preds, int object_id, cv::Mat &sliced_probs,
+                                cv::Mat &sliced_verts) {
+
+  if (object_id < 0 || object_id >= obj_probs.channels()) {
+    printf("Invalid object_id %d for prediction with num_channels: %d\n",
+           object_id, obj_probs.channels());
+    return false;
+  }
+
+  sliced_probs.create(kColorHeight, kColorWidth, CV_32FC1);
+  sliced_verts.create(kColorHeight, kColorWidth, CV_32FC3);
+
+  int from_to_probs[] = {object_id, 0};
+  vector<cv::Mat> source_probs{obj_probs};
+  vector<cv::Mat> dest_probs{sliced_probs};
+  cv::mixChannels(source_probs, dest_probs, from_to_probs, 1);
+
+  const int offset = object_id * 3;
+  int from_to_verts[] = {offset, 0,  offset + 1, 1,  offset + 2, 2};
+  vector<cv::Mat> source_verts{vertex_preds};
+  vector<cv::Mat> dest_verts{sliced_verts};
+  cv::mixChannels(source_verts, dest_verts, from_to_verts, 3);
+
+  sliced_probs.convertTo(sliced_probs, CV_64FC1);
+  return true;
+}
+
+void ColorizeProbabilityMap(const cv::Mat &probability_map,
+                                       cv::Mat &colored_map) {
+  cv::normalize(probability_map, colored_map, 0.0, 255.0, cv::NORM_MINMAX);
+  colored_map.convertTo(colored_map, CV_8UC3);
+  cv::applyColorMap(colored_map, colored_map, cv::COLORMAP_JET);
 }
 } // namespace dru

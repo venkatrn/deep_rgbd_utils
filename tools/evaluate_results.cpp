@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include <boost/filesystem.hpp>
 
@@ -34,13 +35,99 @@ inline std::istream &operator >>(std::istream &stream,
   return stream;
 }
 
+enum class SymMode {
+  A, // none
+  B, // ninety degrees
+  C, // one eighty degrees
+  D  // radially symmetric
+};
+
+
+std::map<std::string, std::vector<SymMode>> kObjectSymmetries = {
+  {"background", {SymMode::A, SymMode::A, SymMode::A}},
+  {"002_master_chef_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"003_cracker_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"004_sugar_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"005_tomato_soup_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"006_mustard_bottle", {SymMode::A, SymMode::A, SymMode::A}},
+  {"007_tuna_fish_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"008_pudding_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"009_gelatin_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"010_potted_meat_can", {SymMode::A, SymMode::A, SymMode::A}},
+  {"011_banana", {SymMode::A, SymMode::A, SymMode::A}},
+  {"019_pitcher_base", {SymMode::A, SymMode::A, SymMode::A}},
+  {"021_bleach_cleanser", {SymMode::A, SymMode::A, SymMode::A}},
+  {"024_bowl", {SymMode::A, SymMode::A, SymMode::D}},
+  {"025_mug", {SymMode::A, SymMode::A, SymMode::A}},
+  {"035_power_drill", {SymMode::A, SymMode::A, SymMode::A}},
+  {"036_wood_block", {SymMode::C, SymMode::C, SymMode::B}},
+  {"037_scissors", {SymMode::A, SymMode::A, SymMode::A}},
+  {"040_large_marker", {SymMode::A, SymMode::D, SymMode::A}},
+  {"051_large_clamp", {SymMode::A, SymMode::C, SymMode::A}},
+  {"052_extra_large_clamp", {SymMode::C, SymMode::A, SymMode::A}},
+  {"061_foam_brick", {SymMode::A, SymMode::A, SymMode::C}}
+};
+
+double normalize_angle_positive(double angle) {
+  return fmod(fmod(angle, 2.0 * M_PI) + 2.0 * M_PI, 2.0 * M_PI);
+}
+
+Eigen::Matrix3f rpy_to_rot(const Eigen::Vector3f &rpy) {
+  Eigen::Matrix3f rot;
+  rot = Eigen::AngleAxisf(rpy[0], Eigen::Vector3f::UnitX())
+        * Eigen::AngleAxisf(rpy[1], Eigen::Vector3f::UnitY())
+        * Eigen::AngleAxisf(rpy[2], Eigen::Vector3f::UnitZ());
+  return rot;
+}
+
+void CanonicalizeRPY(Eigen::Vector3f &rpy,
+                     const vector<SymMode> &symmetry_modes) {
+  for (int ii = 0; ii < 3; ++ii) {
+    rpy[ii] = normalize_angle_positive(rpy[ii]);
+
+    switch (symmetry_modes[ii]) {
+    case SymMode::A:
+      break;
+
+    case SymMode::B:
+      rpy[ii] = fmod(rpy[ii], M_PI / 2.0);
+      break;
+
+    case SymMode::C:
+      rpy[ii] = fmod(rpy[ii], M_PI);
+      break;
+
+    case SymMode::D:
+      rpy[ii] = 0;
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
 void EvaluatePose(const Eigen::Matrix4f &gt_pose, const Eigen::Matrix4f &pose,
+                  const std::string &model_name,
                   float *trans_error, float *rot_error) {
   Eigen::Vector3f t_diff = gt_pose.block<3, 1>(0, 3) - pose.block<3, 1>(0, 3);
   cout << t_diff.transpose() << endl;
 
-  Eigen::Quaternionf q1(gt_pose.block<3, 3>(0, 0));
-  Eigen::Quaternionf q2(pose.block<3, 3>(0, 0));
+  Eigen::Matrix3f R_gt = gt_pose.block<3, 3>(0, 0);
+  Eigen::Matrix3f R_est = pose.block<3, 3>(0, 0);
+
+  Eigen::Vector3f rpy_gt = R_gt.eulerAngles(0, 1, 2);
+  Eigen::Vector3f rpy_est = R_est.eulerAngles(0, 1, 2);
+
+  const auto& symmetry_modes = kObjectSymmetries[model_name];
+  CanonicalizeRPY(rpy_gt, symmetry_modes);
+  CanonicalizeRPY(rpy_est, symmetry_modes);
+
+  Eigen::Matrix3f modified_gt_pose = rpy_to_rot(rpy_gt);
+  Eigen::Matrix3f modified_est_pose = rpy_to_rot(rpy_est);
+
+  Eigen::Quaternionf q1(modified_gt_pose.block<3, 3>(0, 0));
+  Eigen::Quaternionf q2(modified_est_pose.block<3, 3>(0, 0));
 
   *trans_error = t_diff.norm();
   *rot_error = q1.angularDistance(q2);
@@ -192,7 +279,8 @@ int main(int argc, char **argv) {
       vector<vector<Eigen::Matrix4f>> predicted_transforms;
       vector<string> predicted_model_names;
 
-      if (!ReadPredictionsFile(predictions_file, model_names.size(), &predicted_model_names,
+      if (!ReadPredictionsFile(predictions_file, model_names.size(),
+                               &predicted_model_names,
                                &predicted_transforms)) {
         cerr << "Invalid predictions file " << gt_file << endl;
       }
@@ -216,9 +304,12 @@ int main(int argc, char **argv) {
         std::iota(error_idxs.begin(), error_idxs.end(), 0);
 
         //  TODO: write object name to file
+        const int cutoff = 5;
+        const int num_poses = std::min(cutoff, static_cast<int>(predicted_transforms[ii].size()));
 
-        for (size_t jj = 0; jj < predicted_transforms[ii].size(); ++jj) {
+        for (int jj = 0; jj < num_poses; ++jj) {
           EvaluatePose(model_transforms[ii], predicted_transforms[ii][jj],
+                       model_names[ii],
                        &trans_errors[jj],
                        &rot_errors[jj]);
           errors[jj] = 10 * trans_errors[jj] + rot_errors[jj];
@@ -229,7 +320,7 @@ int main(int argc, char **argv) {
         // std::ofstream file;
         // file.open(model_stats_file, std::ofstream::out | std::ofstream::app);
         //
-        for (size_t jj = 0; jj < predicted_transforms[ii].size(); ++jj) {
+        for (int jj = 0; jj < num_poses; ++jj) {
           file << trans_errors[jj];
 
           if (jj != predicted_transforms[ii].size() - 1) {
@@ -239,7 +330,7 @@ int main(int argc, char **argv) {
 
         file << endl;
 
-        for (size_t jj = 0; jj < predicted_transforms[ii].size(); ++jj) {
+        for (int jj = 0; jj < num_poses; ++jj) {
           file << rot_errors[jj];
 
           if (jj != predicted_transforms[ii].size() - 1) {

@@ -8,8 +8,12 @@
 #include <cstdint>
 
 #include <Eigen/Core>
+#include <Eigen/Geometry> 
 
 #include <boost/filesystem.hpp>
+#include <pangolin/pangolin.h>
+
+#include <opencv2/highgui/highgui.hpp>
 
 using namespace std;
 using namespace dru;
@@ -34,17 +38,115 @@ inline std::istream &operator >>(std::istream &stream,
   return stream;
 }
 
+enum class SymMode {
+  A, // none
+  B, // ninety degrees
+  C, // one eighty degrees
+  D  // radially symmetric
+};
+
+
+std::map<std::string, std::vector<SymMode>> kObjectSymmetries = {
+  {"background", {SymMode::A, SymMode::A, SymMode::A}},
+  {"002_master_chef_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"003_cracker_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"004_sugar_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"005_tomato_soup_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"006_mustard_bottle", {SymMode::A, SymMode::A, SymMode::A}},
+  {"007_tuna_fish_can", {SymMode::A, SymMode::A, SymMode::D}},
+  {"008_pudding_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"009_gelatin_box", {SymMode::A, SymMode::A, SymMode::A}},
+  {"010_potted_meat_can", {SymMode::A, SymMode::A, SymMode::A}},
+  {"011_banana", {SymMode::A, SymMode::A, SymMode::A}},
+  {"019_pitcher_base", {SymMode::A, SymMode::A, SymMode::A}},
+  {"021_bleach_cleanser", {SymMode::A, SymMode::A, SymMode::A}},
+  {"024_bowl", {SymMode::A, SymMode::A, SymMode::D}},
+  {"025_mug", {SymMode::A, SymMode::A, SymMode::A}},
+  {"035_power_drill", {SymMode::A, SymMode::A, SymMode::A}},
+  {"036_wood_block", {SymMode::C, SymMode::C, SymMode::B}},
+  {"037_scissors", {SymMode::A, SymMode::A, SymMode::A}},
+  {"040_large_marker", {SymMode::A, SymMode::D, SymMode::A}},
+  {"051_large_clamp", {SymMode::A, SymMode::C, SymMode::A}},
+  {"052_extra_large_clamp", {SymMode::C, SymMode::A, SymMode::A}},
+  {"061_foam_brick", {SymMode::A, SymMode::A, SymMode::C}}
+};
+
+double normalize_angle_positive(double angle) {
+  return fmod(fmod(angle, 2.0 * M_PI) + 2.0 * M_PI, 2.0 * M_PI);
+}
+
+Eigen::Matrix3f rpy_to_rot(const Eigen::Vector3f &rpy) {
+  Eigen::Matrix3f rot;
+  rot = Eigen::AngleAxisf(rpy[0], Eigen::Vector3f::UnitX())
+        * Eigen::AngleAxisf(rpy[1], Eigen::Vector3f::UnitY())
+        * Eigen::AngleAxisf(rpy[2], Eigen::Vector3f::UnitZ());
+  return rot;
+}
+
+void CanonicalizeRPY(Eigen::Vector3f &rpy,
+                     const vector<SymMode> &symmetry_modes) {
+  for (int ii = 0; ii < 3; ++ii) {
+    rpy[ii] = normalize_angle_positive(rpy[ii]);
+
+    switch (symmetry_modes[ii]) {
+    case SymMode::A:
+      break;
+
+    case SymMode::B:
+      rpy[ii] = fmod(rpy[ii], M_PI / 2.0);
+      break;
+
+    case SymMode::C:
+      rpy[ii] = fmod(rpy[ii], M_PI);
+      break;
+
+    case SymMode::D:
+      rpy[ii] = 0;
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
 void EvaluatePose(const Eigen::Matrix4f &gt_pose, const Eigen::Matrix4f &pose,
+                  const std::string &model_name,
                   float *trans_error, float *rot_error) {
   Eigen::Vector3f t_diff = gt_pose.block<3, 1>(0, 3) - pose.block<3, 1>(0, 3);
-  // cout << t_diff.transpose() << endl;
+  cout << t_diff.transpose() << endl;
 
-  Eigen::Quaternionf q1(gt_pose.block<3, 3>(0, 0));
-  Eigen::Quaternionf q2(pose.block<3, 3>(0, 0));
+  Eigen::Matrix3f R_gt = gt_pose.block<3, 3>(0, 0);
+  Eigen::Matrix3f R_est = pose.block<3, 3>(0, 0);
+
+  Eigen::Vector3f rpy_gt = R_gt.eulerAngles(0, 1, 2);
+  Eigen::Vector3f rpy_est = R_est.eulerAngles(0, 1, 2);
+
+  const auto &symmetry_modes = kObjectSymmetries[model_name];
+  CanonicalizeRPY(rpy_gt, symmetry_modes);
+  CanonicalizeRPY(rpy_est, symmetry_modes);
+
+  Eigen::Matrix3f modified_gt_pose = rpy_to_rot(rpy_gt);
+  Eigen::Matrix3f modified_est_pose = rpy_to_rot(rpy_est);
+
+  Eigen::Quaternionf q1(modified_gt_pose.block<3, 3>(0, 0));
+  Eigen::Quaternionf q2(modified_est_pose.block<3, 3>(0, 0));
 
   *trans_error = t_diff.norm();
   *rot_error = q1.angularDistance(q2);
 }
+
+// void EvaluatePose(const Eigen::Matrix4f &gt_pose, const Eigen::Matrix4f &pose,
+//                   float *trans_error, float *rot_error) {
+//   Eigen::Vector3f t_diff = gt_pose.block<3, 1>(0, 3) - pose.block<3, 1>(0, 3);
+//   // cout << t_diff.transpose() << endl;
+//
+//   Eigen::Quaternionf q1(gt_pose.block<3, 3>(0, 0));
+//   Eigen::Quaternionf q2(pose.block<3, 3>(0, 0));
+//
+//   *trans_error = t_diff.norm();
+//   *rot_error = q1.angularDistance(q2);
+// }
 
 bool ReadGTFile(const std::string &gt_file, std::vector<string> *model_names,
                 std::vector<Eigen::Matrix4f> *model_transforms) {
@@ -79,6 +181,7 @@ int main(int argc, char **argv) {
   boost::filesystem::path dataset_dir = argv[1];
   boost::filesystem::path output_dir = argv[2];
   string target_object = "";
+
   if (argc > 3) {
     target_object = argv[3];
   }
@@ -155,12 +258,14 @@ int main(int argc, char **argv) {
       // Skip this scene if it doesn't contain the target object.
       if (!target_object.empty()) {
         bool scene_contains_target = false;
-        for (const string& object : model_names) {
+
+        for (const string &object : model_names) {
           if (object == target_object) {
             scene_contains_target = true;
             break;
           }
         }
+
         if (!scene_contains_target) {
           continue;
         }
@@ -179,20 +284,26 @@ int main(int argc, char **argv) {
       std::vector<Eigen::Matrix4f> output_transforms;
 
       std::ofstream scene_file;
-      const string scene_stats_file = output_dir.string() + "/" + scene + "/" + image_num + "_predictions.txt";
+      const string scene_stats_file = output_dir.string() + "/" + scene + "/" +
+                                      image_num + "_predictions.txt";
       scene_file.open(scene_stats_file, std::ofstream::out);
+
       for (size_t ii = 0; ii < model_names.size(); ++ii) {
         // cout << "true pose " << endl;
         // cout << model_transforms[ii] << endl;
         string im_prefix = image_num + "_" + model_names[ii] ;
+        pose_estimator.SetImageNum(image_num);
         pose_estimator.SetVerbose(scene_output_dir, im_prefix);
 
         // If we are detecting a specific object, ignore others.
         if (!target_object.empty() && model_names[ii] != target_object) {
           continue;
         }
+
         output_transforms = pose_estimator.GetObjectPoseCandidates(rgb_file,
                                                                    depth_file, model_names[ii], num_candidates);
+
+        vector<double> ransac_scores = pose_estimator.GetRANSACScores();
 
         const string model_stats_file = output_dir.string() + "/" + model_names[ii] +
                                         "_stats.txt";
@@ -205,7 +316,8 @@ int main(int argc, char **argv) {
         std::iota(error_idxs.begin(), error_idxs.end(), 0);
 
         for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
-          EvaluatePose(model_transforms[ii], output_transforms[jj], &trans_errors[jj],
+          EvaluatePose(model_transforms[ii], output_transforms[jj], model_names[ii],
+                       &trans_errors[jj],
                        &rot_errors[jj]);
           errors[jj] = 10 * trans_errors[jj] + rot_errors[jj];
         }
@@ -234,9 +346,10 @@ int main(int argc, char **argv) {
         //
 
         // file << endl;
-  
+
         scene_file << model_names[ii] << endl;
         scene_file << output_transforms.size() << endl;
+
         for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
           scene_file << output_transforms[jj] << endl;
           // file << output_transforms[jj] << endl;
@@ -244,14 +357,15 @@ int main(int argc, char **argv) {
 
         // file.close();
 
+
         std::sort(error_idxs.begin(), error_idxs.end(), [&errors](int i1, int i2) {
           return errors[i1] < errors[i2];
         });
 
 
         if (pose_estimator.Verbose()) {
-          Image rgb_img;
-          rgb_img.SetImage(rgb_file);
+          cv::Mat rgb_img;
+          rgb_img = cv::imread(rgb_file);
           // string prefix = pose_estimator.Prefix();
           // string pose_im_name = "pose_0.png" ;
           //   PoseEstimator::DrawProjection(rgb_img, pose_estimator.GetModel(model_names[ii]),
@@ -263,21 +377,25 @@ int main(int argc, char **argv) {
           string prefix = pose_estimator.Prefix();
           string pose_im_name = "gt.png";
           // cout << output_transforms[gt_idx];
-          pose_estimator.DrawProjection(rgb_img, model_names[ii], pose_estimator.GetModel(model_names[ii]),
-                                                                         output_transforms[gt_idx],
-                                                                         prefix + pose_im_name);
+          pose_estimator.DrawProjection(rgb_img, model_names[ii],
+                                        output_transforms[gt_idx],
+                                        prefix + pose_im_name,
+                                        to_string(ransac_scores[gt_idx]));
+
           for (size_t jj = 0; jj < std::min((size_t)5, output_transforms.size()); ++jj) {
             int new_idx = jj;
             string prefix = pose_estimator.Prefix();
             string pose_im_name = "pose_" + to_string(jj) + "_rank_" + to_string(new_idx) +
                                   ".png";
             // cout << output_transforms[new_idx];
-            pose_estimator.DrawProjection(rgb_img, model_names[ii], pose_estimator.GetModel(model_names[ii]),
-                                                                           output_transforms[new_idx],
-                                                                           prefix + pose_im_name);
+            pose_estimator.DrawProjection(rgb_img, model_names[ii],
+                                          output_transforms[new_idx],
+                                          prefix + pose_im_name,
+                                          to_string(ransac_scores[jj]));
           }
         }
       }
+
       scene_file.close();
     }
 
