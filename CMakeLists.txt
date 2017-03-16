@@ -47,6 +47,8 @@ set(SUITESPARSE_LIBRARIES "cholmod;metis")
 include_directories(${SUITESPARSE_INCLUDE_DIRS})
 link_libraries(${SUITESPARSE_LIBRARIES})
 
+
+
 # find_package(PCL 1.7 REQUIRED COMPONENTS common io)
 # include_directories(${PCL_INCLUDE_DIRS})
 # link_directories(${PCL_LIBRARIES})
@@ -78,10 +80,23 @@ find_package(CUDA)
 
 find_package(PkgConfig QUIET)
 
-include(CMakeForceCompiler)
-CMAKE_FORCE_CXX_COMPILER(mpicxx ${CMAKE_CXX_COMPILER_ID})
-# set(CMAKE_CXX_COMPILE_FLAGS ${CMAKE_CXX_COMPILE_FLAGS} ${MPI_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS})
-# set(CMAKE_CXX_LINK_FLAGS ${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS})
+find_package(Armadillo REQUIRED)
+include_directories(${ARMADILLO_INCLUDE_DIRS})
+find_path(MLPACK_INCLUDE_DIRS
+  NAMES core.hpp prereqs.hpp
+  PATHS /usr/local/include/ /usr/local/include/mlpack/
+)
+
+# Find libmlpack.so (or equivalent) and store it in MLPACK_LIBRARY.
+# If this example script were smarter, it would also find other
+# dependencies of mlpack and store them in
+# an MLPACK_LIBRARIES variable instead.
+find_library(MLPACK_LIBRARIES
+  NAMES mlpack
+  PATHS /usr/lib64/ /usr/lib/
+  /usr/local/lib64/ /usr/local/
+)
+include_directories(${MLPACK_INCLUDE_DIRS})
 
 include_directories(include ${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS} ${Caffe_INCLUDE_DIRS}
@@ -90,6 +105,12 @@ include_directories(${Pangolin_INCLUDE_DIR} ${Pangolin_CONFIG_INCLUDE_DIR}
   ${CUDA_TOOLKIT_ROOT_DIR}/samples/common/inc)
 include_directories(${Sophus_INCLUDE_DIR})
 include_directories(MPI_INCLUDE_PATH)
+
+
+include(CMakeForceCompiler)
+CMAKE_FORCE_CXX_COMPILER(mpicxx ${CMAKE_CXX_COMPILER_ID})
+# set(CMAKE_CXX_COMPILE_FLAGS ${CMAKE_CXX_COMPILE_FLAGS} ${MPI_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS})
+# set(CMAKE_CXX_LINK_FLAGS ${CMAKE_CXX_LINK_FLAGS} ${MPI_LINK_FLAGS})
 
 catkin_package(
   CATKIN_DEPENDS 
@@ -116,12 +137,14 @@ add_library(${PROJECT_NAME}
   src/image.cpp
   src/ransac.cpp
   src/pose_estimator.cpp
+  src/pff_ransac.cpp
   src/correspondence_rejection_sample_consensus_multiple.cpp
   src/model.cpp
   src/helpers.cpp)
 
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}
   ${PCL_LIBRARIES} ${Caffe_LIBRARIES} ${CUDA_LIBRARIES} ${Pangolin_LIBRARIES}
+  ${ARMADILLO_LIBRARIES} ${MLPACK_LIBRARIES}
   libtiff.so libvtkCommon.so libvtkFiltering.so libvtkRendering.so libvtkIO.so
   libvtkGraphics.so libglog.so)
 # target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}
@@ -135,3 +158,6 @@ target_link_libraries(dataset_generator ${PROJECT_NAME})
 
 add_executable(run_experiments tools/run_experiments.cpp)
 target_link_libraries(run_experiments ${PROJECT_NAME})
+
+add_executable(evaluate_results tools/evaluate_results.cpp)
+target_link_libraries(evaluate_results ${PROJECT_NAME})

@@ -9,6 +9,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <algorithm>
 
 namespace dru {
 
@@ -23,19 +24,19 @@ using PointValuePair = std::pair<cv::Point, double>;
 // constexpr double kPrincipalPointY = 243.335;
 
 // CMU Dataset
-constexpr double kFocalLengthColorX = 1077.7606;
-constexpr double kFocalLengthColorY = 1078.189;
-constexpr double kPrincipalPointX = 323.7872;
-constexpr double kPrincipalPointY = 279.6921;
+// constexpr double kFocalLengthColorX = 1077.7606;
+// constexpr double kFocalLengthColorY = 1078.189;
+// constexpr double kPrincipalPointX = 323.7872;
+// constexpr double kPrincipalPointY = 279.6921;
 
 // UW Dataset
-// constexpr double kFocalLengthColorX = 1066.778;
-// constexpr double kFocalLengthColorY = 1067.487;
-// constexpr double kPrincipalPointX = 312.9869;
-// constexpr double kPrincipalPointY = 241.3109;
-// const static float K1 = 0.04112172;
-// const static float K2 = -0.4798174;
-// const static float K3 = 1.890084;
+constexpr double kFocalLengthColorX = 1066.778;
+constexpr double kFocalLengthColorY = 1067.487;
+constexpr double kPrincipalPointX = 312.9869;
+constexpr double kPrincipalPointY = 241.3109;
+const static float K1 = 0.04112172;
+const static float K2 = -0.4798174;
+const static float K3 = 1.890084;
 
 
 constexpr int kColorWidth = 640;
@@ -144,6 +145,30 @@ T EuclideanDist2(const std::vector<T>&v1, const std::vector<T>& v2) {
 template<typename T>
 T EuclideanDist(const std::vector<T>&v1, const std::vector<T>& v2) {
   return sqrt(EuclideanDist2<T>(v1, v2));
+}
+
+template<typename T>
+bool Argmax(const std::vector<T>& v, int* argmax, T* max_value = nullptr) {
+  auto max_val_it = std::max_element(v.begin(), v.end());
+  if (max_val_it == v.end()) {
+    return false;
+  }
+  *argmax = std::distance(v.begin(),max_val_it);
+  if (max_value != nullptr) {
+    *max_value = *max_val_it;
+  }
+}
+
+template<typename T>
+bool Argmin(const std::vector<T>& v, int* argmin, T* min_value = nullptr) {
+  auto min_val_it = std::min_element(v.begin(), v.end());
+  if (min_val_it == v.end()) {
+    return false;
+  }
+  *argmin = std::distance(v.begin(), min_val_it);
+  if (min_value != nullptr) {
+    *min_value = *min_val_it;
+  }
 }
 
 } // namespace dru

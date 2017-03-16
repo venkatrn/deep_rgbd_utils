@@ -37,7 +37,7 @@ inline std::istream &operator >>(std::istream &stream,
 void EvaluatePose(const Eigen::Matrix4f &gt_pose, const Eigen::Matrix4f &pose,
                   float *trans_error, float *rot_error) {
   Eigen::Vector3f t_diff = gt_pose.block<3, 1>(0, 3) - pose.block<3, 1>(0, 3);
-  cout << t_diff.transpose() << endl;
+  // cout << t_diff.transpose() << endl;
 
   Eigen::Quaternionf q1(gt_pose.block<3, 3>(0, 0));
   Eigen::Quaternionf q2(pose.block<3, 3>(0, 0));
@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   boost::filesystem::directory_iterator dataset_it(dataset_dir), dataset_end;
 
   PoseEstimator pose_estimator;
-  pose_estimator.UseDepth(false);
+  pose_estimator.UseDepth(true);
 
   for (dataset_it; dataset_it != dataset_end; ++dataset_it) {
     // Skip non-video folders (assuming every folder that contains "00" is video folder).
@@ -175,9 +175,12 @@ int main(int argc, char **argv) {
       }
 
 
-      const int num_candidates = 5;
+      const int num_candidates = 500;
       std::vector<Eigen::Matrix4f> output_transforms;
 
+      std::ofstream scene_file;
+      const string scene_stats_file = output_dir.string() + "/" + scene + "/" + image_num + "_predictions.txt";
+      scene_file.open(scene_stats_file, std::ofstream::out);
       for (size_t ii = 0; ii < model_names.size(); ++ii) {
         // cout << "true pose " << endl;
         // cout << model_transforms[ii] << endl;
@@ -207,31 +210,39 @@ int main(int argc, char **argv) {
           errors[jj] = 10 * trans_errors[jj] + rot_errors[jj];
         }
 
-        std::ofstream file;
-        file.open(model_stats_file, std::ofstream::out | std::ofstream::app);
+        // std::ofstream file;
+        // file.open(model_stats_file, std::ofstream::out | std::ofstream::app);
 
+        // for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
+        //   file << trans_errors[jj];
+        //
+        //   if (jj != output_transforms.size() - 1) {
+        //     file << " ";
+        //   }
+        // }
+        //
+        // file << endl;
+        //
+        // for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
+        //   file << rot_errors[jj];
+        //
+        //   if (jj != output_transforms.size() - 1) {
+        //     file << " ";
+        //   }
+        //
+        // }
+        //
+
+        // file << endl;
+  
+        scene_file << model_names[ii] << endl;
+        scene_file << output_transforms.size() << endl;
         for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
-          file << trans_errors[jj];
-
-          if (jj != output_transforms.size() - 1) {
-            file << " ";
-          }
+          scene_file << output_transforms[jj] << endl;
+          // file << output_transforms[jj] << endl;
         }
 
-        file << endl;
-
-        for (size_t jj = 0; jj < output_transforms.size(); ++jj) {
-          file << rot_errors[jj];
-
-          if (jj != output_transforms.size() - 1) {
-            file << " ";
-          }
-
-        }
-
-
-        file << endl;
-        file.close();
+        // file.close();
 
         std::sort(error_idxs.begin(), error_idxs.end(), [&errors](int i1, int i2) {
           return errors[i1] < errors[i2];
@@ -247,18 +258,27 @@ int main(int argc, char **argv) {
           //                                                                  model_transforms[ii],
           //                                                                  prefix + pose_im_name);
           //
+
+          int gt_idx = error_idxs[0];
+          string prefix = pose_estimator.Prefix();
+          string pose_im_name = "gt.png";
+          // cout << output_transforms[gt_idx];
+          pose_estimator.DrawProjection(rgb_img, model_names[ii], pose_estimator.GetModel(model_names[ii]),
+                                                                         output_transforms[gt_idx],
+                                                                         prefix + pose_im_name);
           for (size_t jj = 0; jj < std::min((size_t)5, output_transforms.size()); ++jj) {
-            // int new_idx = error_idxs[jj];
             int new_idx = jj;
             string prefix = pose_estimator.Prefix();
             string pose_im_name = "pose_" + to_string(jj) + "_rank_" + to_string(new_idx) +
                                   ".png";
-            PoseEstimator::DrawProjection(rgb_img, pose_estimator.GetModel(model_names[ii]),
+            // cout << output_transforms[new_idx];
+            pose_estimator.DrawProjection(rgb_img, model_names[ii], pose_estimator.GetModel(model_names[ii]),
                                                                            output_transforms[new_idx],
                                                                            prefix + pose_im_name);
           }
         }
       }
+      scene_file.close();
     }
 
   }

@@ -93,12 +93,11 @@ bool ReadModelFeatures(const string &file,
 
   return true;
 }
-
-
 } // namespace
 
 namespace dru {
 void Model::SetMeans(const std::string &means_file) {
+  means_file_ = means_file;
   cloud_.reset(new pcl::PointCloud<pcl::PointXYZ>);
   vector<int> num_observations;
   if (!ReadModelFeatures(means_file, cloud_, &features_, &num_observations)) {
@@ -114,6 +113,8 @@ void Model::SetMeans(const std::string &means_file) {
     }
   }
   BuildKDTreeIndex(shape_features, kd_tree_index_);
+  ComputeGMM();
+  ComputeNormals();
 }
 std::vector<pcl::PointXYZ> Model::GetNearestPoints(int num_neighbors,
                                                    const FeatureVector &feature_vector,
@@ -139,8 +140,10 @@ std::vector<pcl::PointXYZ> Model::GetNearestPoints(int num_neighbors,
 
 void Model::GetNearestPoints(int num_neighbors,
                                                    const std::vector<FeatureVector> &feature_vectors,
-                                                   std::vector<std::vector<int>>* model_indices) const {
+                                                   std::vector<std::vector<int>>* model_indices,
+                                                   std::vector<std::vector<float>>* distances) const {
   model_indices->clear();
+  distances->clear();
   flann::Matrix<float> query_matrix;
   query_matrix = VectorToFlann<float>(feature_vectors);
   std::vector<std::vector<int>> k_indices(feature_vectors.size(), std::vector<int>(num_neighbors, 0));
@@ -148,6 +151,7 @@ void Model::GetNearestPoints(int num_neighbors,
   kd_tree_index_->knnSearch(query_matrix, k_indices, k_distances,
                               num_neighbors, flann::SearchParams(-1));
   *model_indices = k_indices;
+  *distances = k_distances;
 }
 
 PointCloudPtr Model::GetHeatmapCloud(const FeatureVector &feature_vector) {
@@ -198,5 +202,51 @@ std::vector<float> Model::GetModelMeanFeature() const {
     mean_feature[ii] /= features_.size();
   }
   return mean_feature;
+}
+
+void Model::ComputeNormals() {
+  pcl::NormalEstimationOMP<pcl::PointXYZ, pcl::Normal> ne;
+  ne.setInputCloud(cloud_);
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ> ());
+  ne.setSearchMethod(tree);
+  ne.setRadiusSearch (0.03);
+  normals_.reset(new pcl::PointCloud<pcl::Normal>);
+  ne.compute(*normals_);
+}
+
+Eigen::Vector3f Model::GetNormal(int point_idx) const {
+  const auto &pcl_normal = normals_->points[point_idx];
+  return Eigen::Vector3f(pcl_normal.normal_x, pcl_normal.normal_y, pcl_normal.normal_z);
+}
+
+double Model::GetGMMLikelihood(const FeatureVector& feature_vector) const {
+  using namespace arma;
+  vector<float> x = {feature_vector[29], feature_vector[30], feature_vector[31]};
+  vec a = conv_to<vec>::from(x);
+  // return static_cast<double>(gmm_model_.log_p(a));
+  return mlpack_gmm_.Probability(a);
+}
+
+void Model::ComputeGMM() {
+  using namespace arma;
+  printf("Learning GMM for %s\n", means_file_.c_str());
+  if (features_.empty()) {
+    printf("No features for GMM\n");
+    return;
+  }
+  const int num_points = features_.size();
+  const int dims = 3;
+  mat data(dims, num_points, fill::zeros);
+  for (int ii = 0; ii < num_points; ++ii) {
+    vector<float> x = {features_[ii][29], features_[ii][30], features_[ii][31]};
+    vec a = conv_to<vec>::from(x);
+    data.col(ii) = a;
+  }
+
+  // gmm_model_.learn(data, 3, maha_dist, random_subset, 10, 5, 1e-10, true);
+  
+  const int kNumGaussians = 3;
+  mlpack_gmm_ = mlpack::gmm::GMM(kNumGaussians, 3);
+  mlpack_gmm_.Train(data, 1);
 }
 }
