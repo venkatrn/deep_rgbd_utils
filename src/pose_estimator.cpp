@@ -67,7 +67,7 @@ PoseEstimator::PoseEstimator()  {
   vertRenderer.reset(new df::GLRenderer<df::DepthRenderType>
                      (depthCamera.width(), depthCamera.height()));
   vertRenderer->setCameraParams(colorCamera.params(), colorCamera.numParams());
-  ReadModels(kYCBObjects);
+  // ReadModels(kYCBObjects);
   // vertex_net_.reset(new VertexNet(kTensorFlowProto));
 }
 
@@ -127,6 +127,20 @@ vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(
   //     DrawProjection(rgb_img, model_it->second, transforms[ii], Prefix() + pose_im_name);
   //   }
   // }
+
+  return transforms;
+}
+
+std::vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(cv::Mat rgb_img, cv::Mat depth_img, const std::string &model_name, int num_candidates) {
+  auto model_it = models_.find(model_name);
+
+  if (model_it == models_.end()) {
+    cerr << "Model name " << model_name << " is unknown" << endl;
+    return vector<Eigen::Matrix4f>();
+  }
+
+  std::vector<Eigen::Matrix4f> transforms;
+  GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms);
 
   return transforms;
 }

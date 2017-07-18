@@ -30,8 +30,11 @@ class PoseEstimator {
  public:
   PoseEstimator();
   ~PoseEstimator() = default;
+  bool ReadModels(const std::vector<std::string> &model_names);
   std::vector<Eigen::Matrix4f> GetObjectPoseCandidates(const std::string
                                                        &rgb_file, const std::string &depth_file, const std::string &model_name,
+                                                       int num_candidates);
+  std::vector<Eigen::Matrix4f> GetObjectPoseCandidates(cv::Mat rgb_img, cv::Mat depth_img, const std::string &model_name,
                                                        int num_candidates);
 
   void SetVerbose(const std::string &debug_dir, const std::string &prefix = "") {
@@ -77,7 +80,6 @@ class PoseEstimator {
   // std::map<int, std::string> model_idx_to_name_;
   std::map<std::string, pangolin::GlBuffer> modelVertexBuffers_;
   std::map<std::string, pangolin::GlBuffer> modelCanonicalVertexBuffers_;
-  bool ReadModels(const std::vector<std::string> &model_names);
 
   // Mapping from model name to means file.
   // std::unordered_map<std::string, Model> model_means_map_;

@@ -37,7 +37,7 @@ set(dart_LIBRARY_DIRS ${dart_ROOT}/lib)
 set(dart_LIBRARIES dart)
 include_directories(${dart_ROOT}/src)
 link_directories(${dart_ROOT}/lib)
-link_libraries(dart)
+link_libraries(${dart_ROOT}/lib/libdart.so)
 
 set(YCB_ROOT "/home/venkatrn/research/ycb")
 include_directories(${YCB_ROOT}/include)
@@ -146,8 +146,11 @@ catkin_package(
     Boost
   INCLUDE_DIRS 
     include
+    ${XFUSION_ROOT}/include
   LIBRARIES 
     ${PROJECT_NAME}
+    ${dart_ROOT}/lib/libdart.so
+    ${XFUSION_ROOT}/lib/libxFusion.so
   )
 
 add_library(${PROJECT_NAME}
@@ -161,7 +164,7 @@ add_library(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}  ${CUDA_LIBRARIES} ${Pangolin_LIBRARIES}
   ${ARMADILLO_LIBRARIES} ${MLPACK_LIBRARIES}
-  ${OPENGL_LIBRARIES} ${GLUT_glut_LIBRARY} ${GLEW_LIBRARIES}
+  ${OPENGL_LIBRARIES} ${GLUT_glut_LIBRARY} ${GLEW_LIBRARIES} ${dart_ROOT}/lib/libdart.so
   libtiff.so libvtkCommon.so libvtkFiltering.so libvtkRendering.so libvtkIO.so
   libvtkGraphics.so libglog.so)
 
