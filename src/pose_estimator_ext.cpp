@@ -706,10 +706,14 @@ void PoseEstimator::GetTopPoses(const cv::Mat &img,
   for (size_t ii = 0; ii < candidate_poses.size(); ++ii) {
     double score = 0;
     const auto &pose = candidate_poses[ii];
-    score = EvaluatePoseSDF(pose, filled_depth_image_m, smoothed_likelihood, obj_mask,
-                         model_name);
     candidates[ii].pose = pose;
-    candidates[ii].score = score;
+    if (visual_mode_) {
+      score = EvaluatePoseSDF(pose, filled_depth_image_m, smoothed_likelihood, obj_mask,
+                           model_name);
+      candidates[ii].score = score;
+    } else {
+      candidates[ii].score = 1.0;
+    }
     // cout << pose.matrix() << endl;
     // cout << score;
   }

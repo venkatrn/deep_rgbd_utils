@@ -50,24 +50,29 @@ const double kBackgroundNoise = (1.0 / 20.0);
 
 namespace dru {
 
-PoseEstimator::PoseEstimator()  {
+PoseEstimator::PoseEstimator() : PoseEstimator(true) {
+
+}
+
+PoseEstimator::PoseEstimator(bool visual_mode) : visual_mode_(visual_mode) {
   // for (const string &object : kYCBObjects) {
   //   const string model_means_file = kMeansFolder + "/" + object + ".means";
   //   model_means_map_.insert(make_pair<string, Model>(object.c_str(), Model()));
   //   model_means_map_[object].SetMeans(model_means_file);
   // }
 
-  DatasetManager::ParseRigFile(kRigFile, rig_, T_cd_);
-  const auto &colorCamera = rig_->camera(colorStreamIndex);
-  const auto &depthCamera = rig_->camera(depthStreamIndex);
+  if (visual_mode_) {
+    DatasetManager::ParseRigFile(kRigFile, rig_, T_cd_);
+    const auto &colorCamera = rig_->camera(colorStreamIndex);
+    const auto &depthCamera = rig_->camera(depthStreamIndex);
+    pangolin::CreateWindowAndBind("ycb pose estimation - ", 1280, 960);
+    dart::Model::initializeRenderer(new dart::AssimpMeshReader());
 
-  pangolin::CreateWindowAndBind("ycb pose estimation - ", 1280, 960);
-  dart::Model::initializeRenderer(new dart::AssimpMeshReader());
-
-  vertRenderer.reset(new df::GLRenderer<df::DepthRenderType>
-                     (depthCamera.width(), depthCamera.height()));
-  vertRenderer->setCameraParams(colorCamera.params(), colorCamera.numParams());
-  // ReadModels(kYCBObjects);
+    vertRenderer.reset(new df::GLRenderer<df::DepthRenderType>
+                       (depthCamera.width(), depthCamera.height()));
+    vertRenderer->setCameraParams(colorCamera.params(), colorCamera.numParams());
+    ReadModels(kYCBObjects);
+  }
   // vertex_net_.reset(new VertexNet(kTensorFlowProto));
 }
 
@@ -110,9 +115,9 @@ vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(
   cv::Mat rgb_img, depth_img;
   rgb_img = cv::imread(rgb_file);
   depth_img = cv::imread(depth_file, CV_LOAD_IMAGE_ANYCOLOR | CV_LOAD_IMAGE_ANYDEPTH);
-  auto model_it = models_.find(model_name);
+  auto model_it = kObjectNameToIdx.find(model_name);
 
-  if (model_it == models_.end()) {
+  if (model_it == kObjectNameToIdx.end()) {
     cerr << "Model name " << model_name << " is unknown" << endl;
     return vector<Eigen::Matrix4f>();
   }
@@ -132,9 +137,9 @@ vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(
 }
 
 std::vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(cv::Mat rgb_img, cv::Mat depth_img, const std::string &model_name, int num_candidates) {
-  auto model_it = models_.find(model_name);
+  auto model_it = kObjectNameToIdx.find(model_name);
 
-  if (model_it == models_.end()) {
+  if (model_it == kObjectNameToIdx.end()) {
     cerr << "Model name " << model_name << " is unknown" << endl;
     return vector<Eigen::Matrix4f>();
   }
@@ -228,6 +233,10 @@ void PoseEstimator::DrawProjection(const cv::Mat &rgb_image,
 // }
 
 bool PoseEstimator::ReadModels(const std::vector<std::string> &model_names) {
+  if (!visual_mode_) {
+    printf("Pose Estimator: Cannot read models in non-visual mode\n");
+    return false;
+  }
   for (int i = 0; i < model_names.size(); ++i) {
     const string &model_name = model_names[i];
     auto &model = models_[model_name];

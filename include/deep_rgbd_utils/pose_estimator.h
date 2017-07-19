@@ -29,6 +29,7 @@ namespace dru {
 class PoseEstimator {
  public:
   PoseEstimator();
+  PoseEstimator(bool visual_mode);
   ~PoseEstimator() = default;
   bool ReadModels(const std::vector<std::string> &model_names);
   std::vector<Eigen::Matrix4f> GetObjectPoseCandidates(const std::string
@@ -70,6 +71,7 @@ class PoseEstimator {
 
  private:
 
+  bool visual_mode_;
   std::unique_ptr<df::Rig<double>> rig_;
   Sophus::SE3d T_cd_;
   std::vector<double> ransac_scores_;
