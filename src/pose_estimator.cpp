@@ -36,7 +36,8 @@ std::vector<std::string> kYCBObjects = {"002_master_chef_can", "003_cracker_box"
 
 const string kTensorFlowProto =
   "/home/venkatrn/research/dense_features/tensorflow/lov_frozen_graph.pb";
-const string kRigFile = "/home/venkatrn/research/ycb/asus-uw.json";
+// const string kRigFile = "/home/venkatrn/research/ycb/asus-uw.json";
+const string kRigFile = "/home/venkatrn/research/ycb/asus-cmu.json";
 const string kMeansFolder =
   "/home/venkatrn/research/dense_features/means/lov_rgbd";
 const float kSDFResolution = 0.0005;
@@ -123,7 +124,11 @@ vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(
   }
 
   std::vector<Eigen::Matrix4f> transforms;
-  GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms);
+  if (visual_mode_) {
+    GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms);
+  } else {
+    GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms, num_candidates);
+  }
 
   // if (Verbose()) {
   //   for (size_t ii = 0; ii < transforms.size(); ++ii) {
@@ -145,7 +150,11 @@ std::vector<Eigen::Matrix4f> PoseEstimator::GetObjectPoseCandidates(cv::Mat rgb_
   }
 
   std::vector<Eigen::Matrix4f> transforms;
-  GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms);
+  if (visual_mode_) {
+    GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms);
+  } else {
+    GetTopPoses(rgb_img, depth_img, model_name, num_candidates, &transforms, num_candidates);
+  }
 
   return transforms;
 }

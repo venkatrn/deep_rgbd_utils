@@ -492,6 +492,40 @@ void GenerateSample(const cv::Mat &integral_image,
 }
 
 
+void PoseEstimator::SetPrediction(const std::string &probs, const std::string &verts) {
+    probs_mat_ = probs;
+    verts_mat_ = verts;
+    loadMat(obj_probs_, probs_mat_);
+    loadMat(vert_preds_, verts_mat_);
+    GetLabelImage(obj_probs_, obj_labels_);
+}
+
+void PoseEstimator::GetObjectMask(const std::string &model_name, cv::Mat& object_mask) {
+  if (object_masks_.find(model_name) != object_masks_.end()) {
+    object_masks_[model_name].copyTo(object_mask);
+    return;
+  }
+
+  cv::Mat obj_labels, obj_probs;
+  string prob_file = probs_mat_;
+
+  // TODO: remove.
+  if (prob_file == "") {
+    prob_file = debug_dir_ + "/" + im_num_ + "_probs.mat";
+    loadMat(obj_probs, prob_file) ;
+    GetLabelImage(obj_probs, obj_labels);
+  } else {
+    obj_probs = obj_probs_;
+    obj_labels = obj_labels_;
+  }
+
+  const int object_idx = kObjectNameToIdx[model_name];
+  object_mask = cv::Mat::zeros(obj_labels.size(), CV_8UC1);
+  object_mask.setTo(255, obj_labels == object_idx);
+  object_mask.copyTo(object_masks_[model_name]);
+  return;
+}
+
 void PoseEstimator::GetTopPoses(const cv::Mat &img,
                                 const cv::Mat &depth_img,
                                 const string &model_name, int num_poses,
@@ -511,16 +545,28 @@ void PoseEstimator::GetTopPoses(const cv::Mat &img,
   cv::Mat obj_labels, obj_probs, vert_preds, sliced_verts, heatmap,
   probability_map;
 
-  string prob_file = debug_dir_ + "/" + im_num_ + "_probs.mat";
-  string vert_file = debug_dir_ + "/" + im_num_ + "_verts.mat";
-  loadMat(obj_probs, prob_file) ;
-  loadMat(vert_preds, vert_file);
+  string prob_file = probs_mat_;
+  string vert_file = verts_mat_;
+
+  // TODO: remove.
+  if (prob_file == "") {
+    prob_file = debug_dir_ + "/" + im_num_ + "_probs.mat";
+    vert_file = debug_dir_ + "/" + im_num_ + "_verts.mat";
+    loadMat(obj_probs, prob_file) ;
+    loadMat(vert_preds, vert_file);
+    GetLabelImage(obj_probs, obj_labels);
+  } else {
+    obj_probs = obj_probs_;
+    vert_preds = vert_preds_;
+    obj_labels = obj_labels_;
+  }
+
   const int object_idx = kObjectNameToIdx[model_name];
   SlicePrediction(obj_probs, vert_preds, object_idx, probability_map,
                   sliced_verts);
-  GetLabelImage(obj_probs, obj_labels);
   cv::Mat obj_mask = cv::Mat::zeros(obj_labels.size(), CV_8UC1);
   obj_mask.setTo(255, obj_labels == object_idx);
+  obj_mask.copyTo(object_masks_[model_name]);
 
   // ColorizeProbabilityMap(probability_map, object_labels);
   // cv::imwrite(Prefix() + "b_labels.png", object_labels);

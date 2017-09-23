@@ -37,7 +37,9 @@ class PoseEstimator {
                                                        int num_candidates);
   std::vector<Eigen::Matrix4f> GetObjectPoseCandidates(cv::Mat rgb_img, cv::Mat depth_img, const std::string &model_name,
                                                        int num_candidates);
+  void GetObjectMask(const std::string &model_name, cv::Mat& object_mask);
 
+  void SetPrediction(const std::string &probs, const std::string &verts);
   void SetVerbose(const std::string &debug_dir, const std::string &prefix = "") {
     debug_dir_ = debug_dir;
     im_prefix_ = prefix;
@@ -75,6 +77,8 @@ class PoseEstimator {
   std::unique_ptr<df::Rig<double>> rig_;
   Sophus::SE3d T_cd_;
   std::vector<double> ransac_scores_;
+  // Cached object masks.
+  std::unordered_map<std::string, cv::Mat> object_masks_;
 
   std::unique_ptr<df::GLRenderer<df::DepthRenderType>> vertRenderer;
   std::map<std::string, dart::HostOnlyModel> models_;
@@ -89,6 +93,14 @@ class PoseEstimator {
   std::string debug_dir_ = "";
   std::string im_prefix_ = "";
   std::string im_num_ = "";
+  // Paths to cv::Mats containing the pixel-wise object probabilities and vertices
+  // produced by vertex net.
+  std::string probs_mat_ = "";
+  std::string verts_mat_ = "";
+  cv::Mat obj_probs_;
+  cv::Mat vert_preds_;
+  cv::Mat obj_labels_;
+
   void GetTopPoses(const cv::Mat &rgb_image, const cv::Mat &depth_image,
                    const std::string &model_name, int num_poses,
                    std::vector<Eigen::Matrix4f> *poses, int num_trials = 1000);

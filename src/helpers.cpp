@@ -142,6 +142,7 @@ void Vector2DToCVMat(const std::vector<std::vector<double>>& array2d, cv::Mat& m
 void GetLabelImage(const cv::Mat &obj_probs, cv::Mat &labels) {
   labels.create(kColorHeight, kColorWidth, CV_8UC1);
 
+  #pragma omp parallel for
   for (int ii = 0; ii < kColorHeight; ++ii) {
     for (int jj = 0; jj < kColorWidth; ++jj) {
       typedef cv::Vec<float, kNumClasses> ProbVec;

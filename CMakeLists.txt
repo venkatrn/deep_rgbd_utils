@@ -166,7 +166,7 @@ target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBRARIES} ${MPI_LIBRARIES} ${Boo
   ${ARMADILLO_LIBRARIES} ${MLPACK_LIBRARIES}
   ${OPENGL_LIBRARIES} ${GLUT_glut_LIBRARY} ${GLEW_LIBRARIES} ${dart_ROOT}/lib/libdart.so
   libtiff.so libvtkCommon.so libvtkFiltering.so libvtkRendering.so libvtkIO.so
-  libvtkGraphics.so libglog.so)
+  libvtkGraphics.so libglog.so gflags)
 
 add_executable(loader src/loader.cc)
 target_link_libraries(loader ${catkin_LIBRARIES}
@@ -175,8 +175,8 @@ target_link_libraries(loader ${catkin_LIBRARIES}
 # add_executable(net_driver src/net_driver.cpp)
 # target_link_libraries(net_driver ${PROJECT_NAME})
 
-# add_executable(dataset_generator tools/dataset_generator.cpp)
-# target_link_libraries(dataset_generator ${PROJECT_NAME})
+add_executable(dataset_generator tools/dataset_generator.cpp)
+target_link_libraries(dataset_generator ${PROJECT_NAME})
 
 add_executable(run_lov_experiments tools/run_experiments.cpp)
 target_link_libraries(run_lov_experiments ${PROJECT_NAME})
